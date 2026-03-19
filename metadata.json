@@ -1,0 +1,5 @@
+{
+  "name": "Client Data Dashboards",
+  "description": "Manage and view Google Analytics, Search Console, and BigQuery data for multiple clients.",
+  "requestFramePermissions": []
+}
