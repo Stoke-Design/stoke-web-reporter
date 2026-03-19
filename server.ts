@@ -828,11 +828,12 @@ async function startServer() {
       await pushReporterUrlToHubSpot(token, sub.recordId, `https://reports.stokedesign.co/${client.slug}`);
 
       // Pull care_plan → Appwrite
-      if (sub.carePlan !== undefined) {
+      if (sub.carePlan !== null && sub.carePlan !== undefined) {
         await setClientCarePlan(client.id, sub.carePlan);
       }
 
-      res.json({ success: true, subscription: sub });
+      console.log(`[HubSpot] Sync complete for ${client.name}: carePlan=${sub.carePlan}`);
+      res.json({ success: true, subscription: sub, carePlanSaved: sub.carePlan });
     } catch (err: any) {
       console.error('HubSpot sync error:', err.message);
       res.status(500).json({ error: err.message });

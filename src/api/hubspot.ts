@@ -19,8 +19,10 @@ const HUBSPOT_API_BASE = 'https://api.hubapi.com';
 const OBJECT_TYPE = 'subscriptions'; // Built-in HubSpot Subscriptions object (0-69)
 
 // Properties to fetch from each subscription record
+// Include common variants of care_plan property name in case the internal name differs
 const SUBSCRIPTION_PROPERTIES = [
   'care_plan',
+  'hs_care_plan',
   'billing_method',
   'sla_type',
   'billing_frequency',
@@ -42,7 +44,7 @@ function mapSubscription(data: any): HubSpotSubscriptionData {
   const props = data.properties || {};
   return {
     recordId:        data.id || '',
-    carePlan:        props.care_plan || null,
+    carePlan:        props.care_plan || props.hs_care_plan || null,
     billingMethod:   props.billing_method || null,
     slaType:         props.sla_type || null,
     billingFrequency: props.billing_frequency || props.recurring_billing_frequency || null,
@@ -92,6 +94,8 @@ export async function getHubSpotSubscriptionByUrl(
 
   const data = await res.json();
   if (!data.results || data.results.length === 0) return null;
+  // Log raw properties to help debug property name mismatches
+  console.log('[HubSpot] Raw subscription properties:', JSON.stringify(data.results[0].properties, null, 2));
   return mapSubscription(data.results[0]);
 }
 

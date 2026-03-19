@@ -963,27 +963,18 @@ export default function ClientDashboard() {
       },
     ];
 
-    const carePlan = client?.care_plan?.toLowerCase() || null;
+    const rawCarePlan = client?.care_plan || null;
+    // Match on first word so "Pink Plan" → pink, "White Plan" → white, "Black Plan" → black
+    const carePlanKey = rawCarePlan ? rawCarePlan.toLowerCase().split(' ')[0] : null;
     const carePlanStyles: Record<string, { bg: string; text: string; border: string; chip: string }> = {
-      pink:  { bg: 'bg-pink-50', text: 'text-pink-800', border: 'border-pink-200', chip: 'bg-pink-400' },
-      white: { bg: 'bg-white',   text: 'text-gray-800', border: 'border-gray-200', chip: 'bg-white border border-gray-300' },
-      black: { bg: 'bg-gray-900', text: 'text-white',   border: 'border-gray-700', chip: 'bg-gray-900' },
+      pink:  { bg: 'bg-pink-50',   text: 'text-pink-800',  border: 'border-pink-200', chip: 'bg-pink-400' },
+      white: { bg: 'bg-white',     text: 'text-gray-700',  border: 'border-gray-200', chip: 'bg-white border-2 border-gray-300' },
+      black: { bg: 'bg-gray-900',  text: 'text-white',     border: 'border-gray-700', chip: 'bg-gray-900' },
     };
-    const cpStyle = carePlan ? carePlanStyles[carePlan] : null;
+    const cpStyle = carePlanKey ? carePlanStyles[carePlanKey] : null;
 
     return (
       <div className="space-y-6">
-        {/* Care Plan badge */}
-        {carePlan && cpStyle && (
-          <div className={`rounded-3xl border ${cpStyle.border} ${cpStyle.bg} p-5 flex items-center gap-3`}>
-            <span className={`inline-block w-5 h-5 rounded-full shrink-0 ${cpStyle.chip}`} />
-            <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Care Plan</p>
-              <p className={`text-lg font-bold capitalize ${cpStyle.text}`}>{carePlan}</p>
-            </div>
-          </div>
-        )}
-
         {/* Stats grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           {stats.map((s) => (
@@ -995,6 +986,18 @@ export default function ClientDashboard() {
               )}
             </div>
           ))}
+          {/* Care Plan card — fills the 8th (empty) slot in the 4-column grid */}
+          <div className={`rounded-3xl border p-5 ${cpStyle ? `${cpStyle.bg} ${cpStyle.border}` : 'bg-white border-gray-200'}`}>
+            <p className={`text-xs font-semibold uppercase tracking-wider mb-2 ${cpStyle?.text || 'text-gray-500'}`}>Care Plan</p>
+            {rawCarePlan && cpStyle ? (
+              <div className="flex items-center gap-2">
+                <span className={`inline-block w-4 h-4 rounded-full shrink-0 ${cpStyle.chip}`} />
+                <p className={`text-base font-bold ${cpStyle.text}`}>{rawCarePlan}</p>
+              </div>
+            ) : (
+              <p className="text-base font-bold text-gray-400">—</p>
+            )}
+          </div>
         </div>
 
         {/* Pending upgrades table */}

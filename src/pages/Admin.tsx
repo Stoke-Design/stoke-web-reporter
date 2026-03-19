@@ -504,11 +504,17 @@ export default function Admin() {
                         {client.gsc_site_url && <span className="px-2 py-1 bg-purple-900/20 text-purple-700 text-xs rounded-md font-medium">GSC</span>}
                         {client.psi_url && <span className="px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md font-medium">PSI</span>}
                         {client.uptime_kuma_slug && <span className="px-2 py-1 bg-emerald-50 text-emerald-700 text-xs rounded-md font-medium">Uptime</span>}
-                        {client.website_url && client.care_plan && (
-                          <span className="px-2 py-1 bg-emerald-50 text-emerald-700 text-xs rounded-md font-medium flex items-center gap-1" title={`Synced — Care Plan: ${client.care_plan}`}>
-                            <CheckCircle2 className="w-3 h-3" />HubSpot
-                          </span>
-                        )}
+                        {client.website_url && client.care_plan && (() => {
+                          const cp = client.care_plan.toLowerCase();
+                          const chipClass = cp.startsWith('pink') ? 'bg-pink-400' : cp.startsWith('black') ? 'bg-gray-900' : 'bg-white border border-gray-300';
+                          return (
+                            <span className="px-2 py-1 bg-emerald-50 text-emerald-700 text-xs rounded-md font-medium flex items-center gap-1.5" title={`Synced — Care Plan: ${client.care_plan}`}>
+                              <CheckCircle2 className="w-3 h-3" />
+                              HubSpot
+                              <span className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 ${chipClass}`} />
+                            </span>
+                          );
+                        })()}
                         {client.website_url && !client.care_plan && (
                           <span className="px-2 py-1 bg-orange-50 text-orange-600 border border-orange-200 text-xs rounded-md font-medium flex items-center gap-1" title="Not synced — no care plan pulled">
                             <XCircle className="w-3 h-3" />HubSpot
@@ -645,9 +651,9 @@ export default function Admin() {
                   <div className="flex items-center gap-2">
                     {formData.care_plan && (
                       <span className={`inline-block w-4 h-4 rounded-full shrink-0 ${
-                        formData.care_plan.toLowerCase() === 'pink' ? 'bg-pink-400' :
-                        formData.care_plan.toLowerCase() === 'black' ? 'bg-gray-900' :
-                        formData.care_plan.toLowerCase() === 'white' ? 'bg-white border border-gray-300' : ''
+                        formData.care_plan.toLowerCase().startsWith('pink')  ? 'bg-pink-400' :
+                        formData.care_plan.toLowerCase().startsWith('black') ? 'bg-gray-900' :
+                        formData.care_plan.toLowerCase().startsWith('white') ? 'bg-white border-2 border-gray-300' : ''
                       }`} />
                     )}
                     <select
@@ -656,9 +662,9 @@ export default function Admin() {
                       className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
                     >
                       <option value="">Not set</option>
-                      <option value="Pink">Pink</option>
-                      <option value="White">White</option>
-                      <option value="Black">Black</option>
+                      <option value="Pink Plan">Pink Plan</option>
+                      <option value="White Plan">White Plan</option>
+                      <option value="Black Plan">Black Plan</option>
                     </select>
                   </div>
                 </div>
