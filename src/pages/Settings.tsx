@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Key, FileJson, AlertCircle, Database, Download, Upload, Plus, Users } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Key, FileJson, AlertCircle, Database, Download, Upload, Plus, Users, Tag, Bot, Activity } from 'lucide-react';
+
+const PAGE_TITLE = 'Stoke Design Website Reporter';
+
 
 export default function Settings() {
   const [loading, setLoading] = useState(false);
@@ -19,7 +22,17 @@ export default function Settings() {
     google_api_key: '',
     global_notification: '',
     global_notification_icon: 'AlertCircle',
+    global_notification_color: 'red',
+    gtm_container_id: '',
+    anthropic_api_key: '',
+    uptime_kuma_url: '',
+    uptime_kuma_username: '',
+    uptime_kuma_password: '',
   });
+
+  useEffect(() => {
+    document.title = `Settings | ${PAGE_TITLE}`;
+  }, []);
 
   const [userFormData, setUserFormData] = useState({
     email: '',
@@ -46,6 +59,12 @@ export default function Settings() {
         google_api_key: data.google_api_key || '',
         global_notification: data.global_notification || '',
         global_notification_icon: data.global_notification_icon || 'AlertCircle',
+        global_notification_color: data.global_notification_color || 'red',
+        gtm_container_id: data.gtm_container_id || '',
+        anthropic_api_key: data.anthropic_api_key || '',
+        uptime_kuma_url: data.uptime_kuma_url || '',
+        uptime_kuma_username: data.uptime_kuma_username || '',
+        uptime_kuma_password: data.uptime_kuma_password || '',
       });
     } catch (err: any) {
       setError(err.message);
@@ -78,7 +97,10 @@ export default function Settings() {
         body: JSON.stringify(formData),
       });
       
-      if (!res.ok) throw new Error('Failed to save settings');
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed to save settings');
+      }
       
       setSuccess('Settings saved successfully');
     } catch (err: any) {
@@ -265,10 +287,10 @@ export default function Settings() {
                       const json = JSON.parse(formData.google_service_account_json);
                       if (json.client_email) {
                         return (
-                          <div className="mt-4 p-4 bg-blue-900/20 border border-blue-900/50 rounded-xl">
-                            <h4 className="text-sm font-semibold text-blue-100 mb-2">Service Account Email</h4>
+                          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                            <h4 className="text-sm font-semibold text-blue-900 mb-2">Service Account Email</h4>
                             <div className="flex items-center gap-2">
-                              <code className="flex-1 p-2 bg-white rounded border border-blue-800 text-xs font-mono text-blue-200 break-all">
+                              <code className="flex-1 p-2 bg-white rounded border border-blue-200 text-xs font-mono text-gray-800 break-all">
                                 {json.client_email}
                               </code>
                               <button
@@ -282,8 +304,8 @@ export default function Settings() {
                                 Copy
                               </button>
                             </div>
-                            <p className="mt-2 text-xs text-blue-300">
-                              <strong>Action Required:</strong> To fix "sufficient permission" errors, add this email as a User (with 'Full' or 'Restricted' permissions) in your <a href="https://search.google.com/search-console/users" target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-100">Google Search Console settings</a>.
+                            <p className="mt-2 text-xs text-blue-800">
+                              <strong>Action Required:</strong> To fix "sufficient permission" errors, add this email as a User (with 'Full' or 'Restricted' permissions) in your <a href="https://search.google.com/search-console/users" target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-900">Google Search Console settings</a>.
                             </p>
                           </div>
                         );
@@ -308,7 +330,7 @@ export default function Settings() {
                     <Key className="w-6 h-6" />
                   </div>
                   <div>
-                    <h2 className="text-lg font-semibold text-gray-900">Google API Key</h2>
+                    <h2 className="text-lg font-semibold text-gray-900">Google PageSpeed API Key</h2>
                     <p className="text-sm text-gray-500">Required for PageSpeed Insights API.</p>
                   </div>
                 </div>
@@ -322,6 +344,58 @@ export default function Settings() {
                     placeholder="AIzaSy..."
                     className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
                   />
+                </div>
+              </section>
+
+              <div className="border-t border-gray-200"></div>
+
+              {/* Google Tag Manager Section */}
+              <section>
+                <div className="flex items-start gap-4 mb-4">
+                  <div className="p-3 bg-green-900/20 text-green-500 rounded-xl">
+                    <Tag className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Google Tag Manager</h2>
+                    <p className="text-sm text-gray-500">Track admin and client dashboard usage via GTM.</p>
+                  </div>
+                </div>
+                <div className="ml-16">
+                  <label className="block text-sm font-medium text-gray-600 mb-2">GTM Container ID</label>
+                  <input
+                    type="text"
+                    value={formData.gtm_container_id}
+                    onChange={(e) => setFormData({ ...formData, gtm_container_id: e.target.value })}
+                    placeholder="GTM-XXXXXXX"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                  />
+                  <p className="mt-2 text-xs text-gray-500">Found in your GTM workspace. Leave blank to disable tracking.</p>
+                </div>
+              </section>
+
+              <div className="border-t border-gray-200"></div>
+
+              {/* Anthropic API Key Section */}
+              <section>
+                <div className="flex items-start gap-4 mb-4">
+                  <div className="p-3 bg-violet-900/20 text-violet-400 rounded-xl">
+                    <Bot className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Anthropic API Key</h2>
+                    <p className="text-sm text-gray-500">Used for Claude AI integrations.</p>
+                  </div>
+                </div>
+                <div className="ml-16">
+                  <label className="block text-sm font-medium text-gray-600 mb-2">API Key</label>
+                  <input
+                    type="password"
+                    value={formData.anthropic_api_key}
+                    onChange={(e) => setFormData({ ...formData, anthropic_api_key: e.target.value })}
+                    placeholder="sk-ant-..."
+                    className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                  />
+                  <p className="mt-2 text-xs text-gray-500">Stored securely server-side and never exposed to the browser.</p>
                 </div>
               </section>
 
@@ -366,8 +440,89 @@ export default function Settings() {
                       <option value="Bell">Bell</option>
                     </select>
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">Banner Colour</label>
+                    <div className="flex gap-3">
+                      {[
+                        { value: 'green',  bg: '#15803d', label: 'Green'  },
+                        { value: 'yellow', bg: '#b45309', label: 'Yellow' },
+                        { value: 'red',    bg: '#b91c1c', label: 'Red'    },
+                      ].map(({ value, bg, label }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, global_notification_color: value })}
+                          className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 text-sm font-medium transition-all ${
+                            formData.global_notification_color === value
+                              ? 'border-gray-900 shadow-md scale-105'
+                              : 'border-gray-200 hover:border-gray-400'
+                          }`}
+                        >
+                          <span className="w-4 h-4 rounded-full inline-block" style={{ backgroundColor: bg }} />
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500">
+                      All colours meet WCAG AA contrast standards with white text.
+                    </p>
+                  </div>
                   <p className="mt-2 text-xs text-gray-500">
-                    Leave blank to remove the notification.
+                    Leave message blank to remove the notification banner.
+                  </p>
+                </div>
+              </section>
+
+              <div className="border-t border-gray-200"></div>
+
+              {/* Uptime Kuma Section */}
+              <section>
+                <div className="flex items-start gap-4 mb-4">
+                  <div className="p-3 bg-emerald-900/20 text-emerald-500 rounded-xl">
+                    <Activity className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Uptime Kuma</h2>
+                    <p className="text-sm text-gray-500">Authenticated connection to your self-hosted Uptime Kuma instance for private monitor data.</p>
+                  </div>
+                </div>
+                <div className="ml-16 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">Instance URL</label>
+                    <input
+                      type="url"
+                      value={formData.uptime_kuma_url}
+                      onChange={(e) => setFormData({ ...formData, uptime_kuma_url: e.target.value })}
+                      placeholder="https://status.stokecloud.dev"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-2">Username</label>
+                      <input
+                        type="text"
+                        autoComplete="off"
+                        value={formData.uptime_kuma_username}
+                        onChange={(e) => setFormData({ ...formData, uptime_kuma_username: e.target.value })}
+                        placeholder="admin"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-2">Password</label>
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={formData.uptime_kuma_password}
+                        onChange={(e) => setFormData({ ...formData, uptime_kuma_password: e.target.value })}
+                        placeholder="••••••••"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Connects via Socket.IO using these credentials. Monitors are matched per-client by a <strong>Monitor Name Filter</strong> configured in Admin — no public status page required.
                   </p>
                 </div>
               </section>

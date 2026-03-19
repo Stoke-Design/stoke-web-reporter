@@ -1,7 +1,8 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import { getClients, getClientBySlug, createClient, updateClient, deleteClient, getSetting, setSetting, getLatestPSISnapshot, savePSISnapshot, saveGAMetrics, saveGSCMetrics, getGAMetrics, getGSCMetrics, getPSISnapshots } from './src/db.js';
-import { fetchGAData, fetchGSCData, fetchBQData, fetchPSIData, listGASites, listGSCSites } from './src/api/google.js';
+import { fetchGAData, fetchGSCData, fetchBQData, fetchPSIData, slimPSIData, listGASites, listGSCSites } from './src/api/google.js';
+import { getUptimeKumaData, clearUptimeKumaCache } from './src/api/uptimeKuma.js';
 import { format, subDays } from 'date-fns';
 
 async function startServer() {
@@ -50,7 +51,7 @@ async function startServer() {
 
             console.log(`Fetching PSI for ${client.name} (${strategy})...`);
             const data = await fetchPSIData(client.psi_url, strategy);
-            await savePSISnapshot(client.id, strategy, data);
+            await savePSISnapshot(client.id, strategy, slimPSIData(data));
             console.log(`Saved PSI snapshot for ${client.name} (${strategy})`);
             
             // Throttle: wait 10 seconds between PSI requests to avoid hitting rate limits
@@ -176,12 +177,24 @@ async function startServer() {
       const googleApiKey = await getSetting('google_api_key') || '';
       const globalNotification = await getSetting('global_notification') || '';
       const globalNotificationIcon = await getSetting('global_notification_icon') || 'AlertCircle';
-      
+      const globalNotificationColor = await getSetting('global_notification_color') || 'red';
+      const gtmContainerId = await getSetting('gtm_container_id') || '';
+      const anthropicApiKey = await getSetting('anthropic_api_key') || '';
+      const uptimeKumaUrl      = await getSetting('uptime_kuma_url')      || '';
+      const uptimeKumaUsername = await getSetting('uptime_kuma_username') || '';
+      const uptimeKumaPassword = await getSetting('uptime_kuma_password') || '';
+
       res.json({
         google_service_account_json: googleServiceAccountJson,
         google_api_key: googleApiKey,
         global_notification: globalNotification,
         global_notification_icon: globalNotificationIcon,
+        global_notification_color: globalNotificationColor,
+        gtm_container_id: gtmContainerId,
+        anthropic_api_key: anthropicApiKey,
+        uptime_kuma_url: uptimeKumaUrl,
+        uptime_kuma_username: uptimeKumaUsername,
+        uptime_kuma_password: uptimeKumaPassword,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -208,9 +221,38 @@ async function startServer() {
       if (global_notification_icon !== undefined) {
         await setSetting('global_notification_icon', global_notification_icon);
       }
-      
+
+      const { global_notification_color, gtm_container_id, anthropic_api_key } = req.body;
+
+      if (global_notification_color !== undefined) {
+        await setSetting('global_notification_color', global_notification_color);
+      }
+
+      if (gtm_container_id !== undefined) {
+        await setSetting('gtm_container_id', gtm_container_id);
+      }
+
+      if (anthropic_api_key !== undefined) {
+        await setSetting('anthropic_api_key', anthropic_api_key);
+      }
+
+      const { uptime_kuma_url, uptime_kuma_username, uptime_kuma_password } = req.body;
+      if (uptime_kuma_url !== undefined) {
+        await setSetting('uptime_kuma_url', uptime_kuma_url);
+        clearUptimeKumaCache();
+      }
+      if (uptime_kuma_username !== undefined) {
+        await setSetting('uptime_kuma_username', uptime_kuma_username);
+        clearUptimeKumaCache();
+      }
+      if (uptime_kuma_password !== undefined) {
+        await setSetting('uptime_kuma_password', uptime_kuma_password);
+        clearUptimeKumaCache();
+      }
+
       res.json({ success: true });
     } catch (err: any) {
+      console.error('[Settings POST] Error:', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -263,6 +305,7 @@ async function startServer() {
         bq_dataset_id: req.body.bq_dataset_id || null,
         bq_table_id: req.body.bq_table_id || null,
         psi_url: req.body.psi_url || null,
+        uptime_kuma_slug: req.body.uptime_kuma_slug || null,
         is_active: req.body.is_active !== undefined ? req.body.is_active : 1,
       };
       const client = await createClient(clientData);
@@ -290,6 +333,7 @@ async function startServer() {
         bq_dataset_id: req.body.bq_dataset_id || null,
         bq_table_id: req.body.bq_table_id || null,
         psi_url: req.body.psi_url || null,
+        uptime_kuma_slug: req.body.uptime_kuma_slug || null,
         is_active: req.body.is_active !== undefined ? req.body.is_active : 1,
       };
       const client = await updateClient(req.params.id, clientData);
@@ -318,7 +362,7 @@ async function startServer() {
       }
       const globalNotification = await getSetting('global_notification');
       const globalNotificationIcon = await getSetting('global_notification_icon');
-      // Don't expose internal IDs or sensitive info if any, just what's needed for the dashboard
+      const globalNotificationColor = await getSetting('global_notification_color') || 'red';
       res.json({
         client_id_number: client.client_id_number,
         name: client.name,
@@ -330,8 +374,10 @@ async function startServer() {
         hasGSC: !!client.gsc_site_url,
         hasBQ: !!client.bq_project_id && !!client.bq_dataset_id && !!client.bq_table_id,
         hasPSI: !!client.psi_url,
+        hasUptime: !!client.uptime_kuma_slug,
         global_notification: globalNotification || null,
         global_notification_icon: globalNotificationIcon || null,
+        global_notification_color: globalNotificationColor,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -485,8 +531,8 @@ async function startServer() {
       console.log(`No PSI snapshot for ${client.name} (${strat}), fetching live...`);
       const data = await fetchPSIData(client.psi_url, strat);
       
-      // Save it for next time
-      await savePSISnapshot(client.id, strat, data);
+      // Save slimmed version — full PSI JSON far exceeds Appwrite's field size limit
+      await savePSISnapshot(client.id, strat, slimPSIData(data));
       
       res.json(data);
     } catch (err: any) {
@@ -515,6 +561,94 @@ async function startServer() {
       }).reverse(); // Oldest first for chart
       
       res.json(history);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Public: Uptime Kuma data for a client (authenticated Socket.IO)
+  app.get('/api/client/:slug/uptime', async (req, res) => {
+    try {
+      const client = await getClientBySlug(req.params.slug);
+      if (!client || client.is_active === 0 || !client.uptime_kuma_slug) {
+        return res.status(404).json({ error: 'Uptime monitoring not configured for this client' });
+      }
+
+      const [ukBaseUrl, ukUsername, ukPassword] = await Promise.all([
+        getSetting('uptime_kuma_url'),
+        getSetting('uptime_kuma_username'),
+        getSetting('uptime_kuma_password'),
+      ]);
+
+      if (!ukBaseUrl || !ukUsername || !ukPassword) {
+        return res.status(500).json({ error: 'Uptime Kuma credentials not fully configured in Settings' });
+      }
+
+      const { monitors: allMonitors, heartbeatList } = await getUptimeKumaData(ukBaseUrl, ukUsername, ukPassword);
+
+      // Filter monitors by name — case-insensitive substring match on the
+      // per-client "monitor name filter" stored in uptime_kuma_slug
+      const nameFilter = client.uptime_kuma_slug.toLowerCase();
+      const matched = Object.values(allMonitors).filter(
+        (m: any) => m.name.toLowerCase().includes(nameFilter)
+      );
+
+      // Helper: compute uptime % from a heartbeat array
+      const calcUptime = (arr: any[]): number | null =>
+        arr.length > 0
+          ? +((arr.filter((h: any) => h.status === 1).length / arr.length) * 100).toFixed(2)
+          : null;
+
+      const result = matched.map((m: any) => {
+        const id = String(m.id);
+        const beats: any[] = heartbeatList[id] || [];
+
+        // beats are in chronological order (oldest first) from Uptime Kuma
+        const currentStatus = beats.length > 0 ? beats[beats.length - 1].status : null;
+
+        const pings = beats
+          .filter((h: any) => h.ping != null && h.ping > 0)
+          .map((h: any) => h.ping as number);
+        const avgPing = pings.length > 0
+          ? Math.round(pings.reduce((a, b) => a + b, 0) / pings.length)
+          : null;
+
+        // Uptime percentages — use last N heartbeats as proxy for time windows
+        // (interval is typically 60s, so 1440 ≈ 24h, 43200 ≈ 30d)
+        const last24  = beats.slice(-1440);
+        const last30d = beats.slice(-43200);
+
+        // Return up to 100 recent heartbeats for the sparkline / chart
+        const recentBeats = beats.slice(-100);
+
+        return {
+          id,
+          name:          m.name,
+          type:          m.type,
+          currentStatus,          // 0=DOWN 1=UP 2=PENDING 3=MAINTENANCE
+          uptime24h:     calcUptime(last24),
+          uptime30d:     calcUptime(last30d),
+          avgPing,
+          heartbeats: recentBeats.map((h: any) => ({
+            status: h.status,
+            ping:   h.ping ?? null,
+            time:   h.time,
+          })),
+        };
+      });
+
+      res.json({ title: client.name, monitors: result });
+    } catch (err: any) {
+      console.error('Uptime Kuma fetch error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Public: App config (safe, non-sensitive values for the frontend)
+  app.get('/api/config', async (req, res) => {
+    try {
+      const gtmContainerId = await getSetting('gtm_container_id') || '';
+      res.json({ gtm_container_id: gtmContainerId });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

@@ -6,11 +6,12 @@ import {
 } from 'recharts';
 import { format, subDays, parseISO } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
-import { 
+import {
   Loader2, AlertCircle, TrendingUp, Users, Eye, MousePointerClick, Search, Download, ExternalLink,
   LayoutDashboard, Share2, FileText, Zap, Gauge, Database, RefreshCw, ChevronRight,
   Calendar, Globe, ArrowUpRight, ArrowDownRight, Activity, Clock, Layers,
-  Info, CheckCircle, AlertTriangle, Megaphone, Bell, Sparkles, Phone, Mail
+  Info, CheckCircle, AlertTriangle, Megaphone, Bell, Sparkles, Phone, Mail,
+  Wifi, WifiOff, Timer
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import html2canvas from 'html2canvas';
@@ -30,8 +31,10 @@ interface ClientInfo {
   hasGSC: boolean;
   hasBQ: boolean;
   hasPSI: boolean;
+  hasUptime: boolean;
   global_notification: string | null;
   global_notification_icon: string | null;
+  global_notification_color: string | null;
   enabled_pages?: string;
 }
 
@@ -65,6 +68,10 @@ export default function ClientDashboard() {
   const [psiError, setPsiError] = useState('');
   const [psiStrategy, setPsiStrategy] = useState<'mobile' | 'desktop'>('mobile');
 
+  const [uptimeData, setUptimeData] = useState<any>(null);
+  const [uptimeLoading, setUptimeLoading] = useState(false);
+  const [uptimeError, setUptimeError] = useState('');
+
   const [dateRange, setDateRange] = useState('30daysAgo');
   const [aiSummary, setAiSummary] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
@@ -94,10 +101,13 @@ export default function ClientDashboard() {
       }
       
       if (client.hasGSC && (activePage === 0 || activePage === 5)) fetchGSC();
-      if (client.hasBQ && (activePage === 7 || activePage === 8)) fetchBQ();
+      if (client.hasBQ && (activePage === 8 || activePage === 9)) fetchBQ();
       if (client.hasPSI && (activePage === 0 || activePage === 6)) {
         fetchPSI();
         fetchPSIHistory();
+      }
+      if (client.hasUptime && activePage === 7) {
+        fetchUptime();
       }
     }
   }, [client, dateRange, customStartDate, customEndDate, activePage]);
@@ -115,6 +125,7 @@ export default function ClientDashboard() {
       if (!res.ok) throw new Error('Client not found');
       const data = await res.json();
       setClient(data);
+      document.title = `${data.name} | Stoke Design Website Reporter`;
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -191,6 +202,21 @@ export default function ClientDashboard() {
       setBqError(err.message);
     } finally {
       setBqLoading(false);
+    }
+  };
+
+  const fetchUptime = async () => {
+    setUptimeLoading(true);
+    setUptimeError('');
+    try {
+      const res = await fetch(`/api/client/${slug}/uptime`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to fetch uptime data');
+      setUptimeData(data);
+    } catch (err: any) {
+      setUptimeError(err.message);
+    } finally {
+      setUptimeLoading(false);
     }
   };
 
@@ -405,8 +431,9 @@ export default function ClientDashboard() {
     { id: 4, name: 'Website Events', icon: Zap, source: 'GA4' },
     { id: 5, name: 'Search Performance', icon: Search, source: 'SC' },
     { id: 6, name: 'Page Speed', icon: Gauge, source: 'PSI' },
-    { id: 7, name: 'Website Statistics', icon: Database, source: 'BQ' },
-    { id: 8, name: 'Website Updates', icon: RefreshCw, source: 'BQ' },
+    { id: 7, name: 'Uptime Monitor', icon: Activity, source: 'Uptime' },
+    { id: 8, name: 'Website Statistics', icon: Database, source: 'BQ' },
+    { id: 9, name: 'Website Updates', icon: RefreshCw, source: 'BQ' },
   ];
 
   const pages = useMemo(() => {
@@ -1004,16 +1031,26 @@ export default function ClientDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col font-sans">
-      {client.global_notification && (
-        <motion.div 
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: 50, opacity: 1 }}
-          className="bg-[#e35e3d] text-[#000000] px-4 h-[50px] flex items-center justify-center text-sm font-bold z-50 relative overflow-hidden shrink-0"
-        >
-          <NotificationIcon />
-          <span>{client.global_notification}</span>
-        </motion.div>
-      )}
+      {client.global_notification && (() => {
+        // WCAG AA-compliant colour map (white text on dark bg, all ≥ 4.5:1 contrast)
+        const colorMap: Record<string, string> = {
+          green:  '#15803d', // contrast 4.64:1 ✓
+          yellow: '#b45309', // contrast 4.73:1 ✓
+          red:    '#b91c1c', // contrast 6.14:1 ✓
+        };
+        const bg = colorMap[client.global_notification_color || 'red'] ?? colorMap.red;
+        return (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 50, opacity: 1 }}
+            style={{ backgroundColor: bg }}
+            className="text-white px-4 h-[50px] flex items-center justify-center text-sm font-bold z-50 relative overflow-hidden shrink-0"
+          >
+            <NotificationIcon />
+            <span>{client.global_notification}</span>
+          </motion.div>
+        );
+      })()}
 
       <header className="bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-40">
         <div className="max-w-[1600px] mx-auto px-6 sm:px-8 h-20 flex items-center justify-between">
@@ -1122,33 +1159,22 @@ export default function ClientDashboard() {
             </div>
 
             <div className="pt-8 border-t border-gray-200">
-              <div className="bg-gray-100 rounded-3xl p-6 relative overflow-hidden group">
-                <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-gray-200 rounded-full opacity-50 group-hover:scale-110 transition-transform"></div>
+              <div className="bg-gray-100 rounded-3xl p-6 relative overflow-hidden">
+                <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-gray-200 rounded-full opacity-50"></div>
                 <div className="relative z-10">
-                  <p className="text-[10px] font-bold text-gray-900 uppercase tracking-wider mb-3">System Status</p>
+                  <p className="text-[10px] font-bold text-gray-900 uppercase tracking-wider mb-3">Reporting System Status</p>
                   <div className="flex items-center gap-3 text-xs font-bold text-gray-900">
                     <div className="relative">
                       <div className="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
                       <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></div>
                     </div>
-                    <span>Live Data Stream</span>
+                    <span>Using live data</span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
           
-          <div className="p-8 border-t border-gray-200">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-gray-100 flex items-center justify-center text-gray-400 font-bold text-sm">
-                {client.name.charAt(0)}
-              </div>
-              <div>
-                <p className="text-xs font-bold text-gray-900">{client.name}</p>
-                <p className="text-[10px] text-gray-400 font-medium">Client Account</p>
-              </div>
-            </div>
-          </div>
         </aside>
 
         {/* Main Content Area */}
@@ -1206,9 +1232,157 @@ export default function ClientDashboard() {
       case 4: return renderWebsiteEvents();
       case 5: return renderSearchPerformance();
       case 6: return renderPageSpeed();
-      case 7: return renderWebsiteStatistics();
-      case 8: return renderWebsiteUpdates();
+      case 7: return renderUptimeMonitor();
+      case 8: return renderWebsiteStatistics();
+      case 9: return renderWebsiteUpdates();
       default: return renderAiOverview();
     }
+  }
+
+  function renderUptimeMonitor() {
+    if (!client?.hasUptime) return <NoDataConfigured source="Uptime Kuma" />;
+    if (uptimeLoading) return <LoadingState />;
+    if (uptimeError) return <ErrorState message={uptimeError} />;
+    if (!uptimeData) return <div className="p-12 text-center text-gray-400">No uptime data available</div>;
+
+    const { title, monitors } = uptimeData as { title: string; monitors: any[] };
+
+    // Status helpers
+    const statusLabel  = (s: number | null) =>
+      s === 1 ? 'UP' : s === 0 ? 'DOWN' : s === 2 ? 'PENDING' : s === 3 ? 'MAINTENANCE' : 'UNKNOWN';
+    const statusColour = (s: number | null) =>
+      s === 1 ? 'text-emerald-600 bg-emerald-50 border-emerald-200'
+      : s === 0 ? 'text-red-600 bg-red-50 border-red-200'
+      : s === 2 ? 'text-amber-600 bg-amber-50 border-amber-200'
+      : 'text-blue-600 bg-blue-50 border-blue-200';
+    const dotColour    = (s: number | null) =>
+      s === 1 ? 'bg-emerald-500' : s === 0 ? 'bg-red-500' : s === 2 ? 'bg-amber-400' : 'bg-blue-400';
+    const beatColour   = (s: number) =>
+      s === 1 ? '#10b981' : s === 0 ? '#ef4444' : s === 2 ? '#f59e0b' : '#60a5fa';
+
+    return (
+      <div className="space-y-10">
+        {/* Page header */}
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">{title}</h2>
+          <p className="text-sm text-gray-500 mt-1">Real-time and historical uptime data from Uptime Kuma</p>
+        </div>
+
+        {monitors.length === 0 && (
+          <div className="p-12 text-center text-gray-400">No monitors found on this status page.</div>
+        )}
+
+        {monitors.map((monitor: any) => {
+          // Build response-time chart data (oldest → newest)
+          const chartData = monitor.heartbeats
+            .filter((h: any) => h.ping != null && h.ping > 0)
+            .slice(-60)
+            .map((h: any, i: number) => ({ i, ping: h.ping, time: h.time }));
+
+          return (
+            <motion.div
+              key={monitor.id}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-3xl border border-gray-200 overflow-hidden"
+            >
+              {/* Monitor header */}
+              <div className="flex flex-wrap items-center justify-between gap-4 p-6 border-b border-gray-100">
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <div className={`w-3 h-3 rounded-full ${dotColour(monitor.currentStatus)}`} />
+                    {monitor.currentStatus === 1 && (
+                      <div className="absolute inset-0 w-3 h-3 rounded-full bg-emerald-500 animate-ping opacity-75" />
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-gray-900 text-lg">{monitor.name}</h3>
+                    <p className="text-xs text-gray-400 uppercase tracking-wider">{monitor.type}</p>
+                  </div>
+                </div>
+                <span className={`px-3 py-1 rounded-full border text-xs font-bold tracking-wider ${statusColour(monitor.currentStatus)}`}>
+                  {statusLabel(monitor.currentStatus)}
+                </span>
+              </div>
+
+              {/* Stats row */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-gray-100">
+                {[
+                  { label: 'Uptime (24 h)',  value: monitor.uptime24h  != null ? `${monitor.uptime24h}%`  : '—', Icon: Activity },
+                  { label: 'Uptime (30 d)',  value: monitor.uptime30d  != null ? `${monitor.uptime30d}%`  : '—', Icon: TrendingUp },
+                  { label: 'Avg Response',   value: monitor.avgPing    != null ? `${monitor.avgPing} ms`  : '—', Icon: Timer },
+                  { label: 'Checks Shown',   value: monitor.heartbeats.length > 0 ? `${monitor.heartbeats.length}` : '—', Icon: Clock },
+                ].map(({ label, value, Icon }) => (
+                  <div key={label} className="p-5 text-center">
+                    <Icon className="w-4 h-4 text-gray-400 mx-auto mb-1" />
+                    <p className="text-xl font-bold text-gray-900">{value}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{label}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Heartbeat bar history */}
+              {monitor.heartbeats.length > 0 && (
+                <div className="px-6 pb-4 pt-2">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                    Last {monitor.heartbeats.length} checks
+                  </p>
+                  <div className="flex gap-px flex-wrap">
+                    {monitor.heartbeats.map((h: any, i: number) => (
+                      <div
+                        key={i}
+                        title={`${h.time ? new Date(h.time).toLocaleString() : ''} — ${statusLabel(h.status)}${h.ping ? ` (${h.ping} ms)` : ''}`}
+                        className="h-8 flex-1 min-w-[4px] max-w-[12px] rounded-sm cursor-default transition-opacity hover:opacity-70"
+                        style={{ backgroundColor: beatColour(h.status) }}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+                    <span>Oldest</span>
+                    <span>Latest</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Response time chart */}
+              {chartData.length > 1 && (
+                <div className="px-6 pb-6">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                    Response Time (ms)
+                  </p>
+                  <ResponsiveContainer width="100%" height={160}>
+                    <AreaChart data={chartData} margin={{ top: 4, right: 0, left: -20, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id={`uptimeGrad-${monitor.id}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%"  stopColor="#10b981" stopOpacity={0.25} />
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                      <XAxis dataKey="i" hide />
+                      <YAxis tick={{ fontSize: 10 }} />
+                      <Tooltip
+                        formatter={(v: any) => [`${v} ms`, 'Response time']}
+                        labelFormatter={() => ''}
+                        contentStyle={{ borderRadius: 12, border: '1px solid #e5e7eb', fontSize: 12 }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="ping"
+                        stroke="#10b981"
+                        strokeWidth={2}
+                        fill={`url(#uptimeGrad-${monitor.id})`}
+                        dot={false}
+                        activeDot={{ r: 4 }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </motion.div>
+          );
+        })}
+      </div>
+    );
   }
 }

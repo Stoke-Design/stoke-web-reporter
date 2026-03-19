@@ -251,25 +251,49 @@ export const fetchBQData = async (
   }
 };
 
+/** Strip full PSI response down to only the fields the dashboard uses.
+ *  Keeps the payload well under Appwrite's 65 535-char string limit. */
+export const slimPSIData = (data: any): any => {
+  const AUDITS_NEEDED = [
+    'largest-contentful-paint',
+    'total-blocking-time',
+    'cumulative-layout-shift',
+  ];
+  const slim: any = {};
+  if (data.lighthouseResult) {
+    slim.lighthouseResult = {
+      categories: data.lighthouseResult.categories ?? {},
+      audits: {} as Record<string, any>,
+    };
+    for (const key of AUDITS_NEEDED) {
+      const audit = data.lighthouseResult.audits?.[key];
+      if (audit) {
+        slim.lighthouseResult.audits[key] = {
+          displayValue: audit.displayValue,
+          score: audit.score,
+        };
+      }
+    }
+  }
+  return slim;
+};
+
 export const fetchPSIData = async (
   url: string,
   strategy: "mobile" | "desktop",
 ) => {
-  const auth = await getAuthClient();
-  const pagespeedonline = google.pagespeedonline({
-    version: "v5",
-    auth: auth || undefined,
-  });
+  // PSI is a public API — it only supports API keys, not service account OAuth.
+  // Always use the API key regardless of whether a service account is configured.
+  const pagespeedonline = google.pagespeedonline({ version: "v5" });
 
   try {
-    // If GOOGLE_API_KEY is set in DB, use it. Otherwise, try env, then without (may hit quota limits).
     const dbKey = await getSetting("google_api_key");
     const key = dbKey || process.env.GOOGLE_API_KEY;
 
     const response = await pagespeedonline.pagespeedapi.runpagespeed({
       url,
       strategy: strategy.toUpperCase() as "MOBILE" | "DESKTOP",
-      key: auth ? undefined : (key as string | undefined), // Don't use key if auth is present
+      key: key as string | undefined,
       category: ["PERFORMANCE", "ACCESSIBILITY", "BEST_PRACTICES", "SEO"],
     });
 

@@ -19,10 +19,15 @@ interface Client {
   bq_dataset_id: string | null;
   bq_table_id: string | null;
   psi_url: string | null;
+  uptime_kuma_slug: string | null;
   is_active: number;
 }
 
 export default function Admin() {
+  useEffect(() => {
+    document.title = 'Admin | Stoke Design Website Reporter';
+  }, []);
+
   const [clients, setClients] = useState<Client[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
@@ -40,13 +45,14 @@ export default function Admin() {
     contact_first_name: '',
     contact_last_name: '',
     contact_email: '',
-    enabled_pages: '[1,2,3,4,5,6,7,8]',
+    enabled_pages: '[1,2,3,4,5,6,7]',
     ga_property_id: '',
     gsc_site_url: '',
     bq_project_id: '',
     bq_dataset_id: '',
     bq_table_id: '',
     psi_url: '',
+    uptime_kuma_slug: '',
     is_active: 1,
   });
 
@@ -86,13 +92,14 @@ export default function Admin() {
         contact_first_name: client.contact_first_name || '',
         contact_last_name: client.contact_last_name || '',
         contact_email: client.contact_email || '',
-        enabled_pages: client.enabled_pages || '[1,2,3,4,5,6,7,8]',
+        enabled_pages: client.enabled_pages || '[1,2,3,4,5,6]',
         ga_property_id: client.ga_property_id || '',
         gsc_site_url: client.gsc_site_url || '',
         bq_project_id: client.bq_project_id || '',
         bq_dataset_id: client.bq_dataset_id || '',
         bq_table_id: client.bq_table_id || '',
         psi_url: client.psi_url || '',
+        uptime_kuma_slug: client.uptime_kuma_slug || '',
         is_active: client.is_active,
       });
     } else {
@@ -106,13 +113,14 @@ export default function Admin() {
         contact_first_name: '',
         contact_last_name: '',
         contact_email: '',
-        enabled_pages: '[1,2,3,4,5,6,7,8]',
+        enabled_pages: '[1,2,3,4,5,6,7]',
         ga_property_id: '',
         gsc_site_url: '',
         bq_project_id: '',
         bq_dataset_id: '',
         bq_table_id: '',
         psi_url: '',
+        uptime_kuma_slug: '',
         is_active: 1,
       });
     }
@@ -456,7 +464,7 @@ export default function Admin() {
                     <td className="p-4 font-medium text-gray-400">{client.client_id_number ? `SD${client.client_id_number}` : '-'}</td>
                     <td className="p-4 font-medium text-gray-900">{client.name}</td>
                     <td className="p-4 text-gray-500">
-                      <Link to={`/client/${client.slug}`} target="_blank" className="flex items-center hover:text-gray-900 transition-colors">
+                      <Link to={`/${client.slug}`} target="_blank" className="flex items-center hover:text-gray-900 transition-colors">
                         /{client.slug}
                         <ExternalLink className="w-3 h-3 ml-1" />
                       </Link>
@@ -467,7 +475,8 @@ export default function Admin() {
                         {client.gsc_site_url && <span className="px-2 py-1 bg-purple-900/20 text-purple-700 text-xs rounded-md font-medium">GSC</span>}
                         {client.bq_project_id && <span className="px-2 py-1 bg-orange-50 text-orange-700 text-xs rounded-md font-medium">BQ</span>}
                         {client.psi_url && <span className="px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md font-medium">PSI</span>}
-                        {!client.ga_property_id && !client.gsc_site_url && !client.bq_project_id && !client.psi_url && (
+                        {client.uptime_kuma_slug && <span className="px-2 py-1 bg-emerald-50 text-emerald-700 text-xs rounded-md font-medium">Uptime</span>}
+                        {!client.ga_property_id && !client.gsc_site_url && !client.bq_project_id && !client.psi_url && !client.uptime_kuma_slug && (
                           <span className="text-gray-400 text-sm italic">None</span>
                         )}
                       </div>
@@ -558,7 +567,7 @@ export default function Admin() {
                       const clientId = e.target.value;
                       setFormData(prev => {
                         const newSlug = !isSlugManuallyEdited && prev.name
-                          ? `SD${clientId}-${prev.name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim().replace(/[\s-]+/g, '-')}`
+                          ? `sd${clientId}${prev.name.toLowerCase().replace(/[^a-z0-9]/g, '')}`
                           : prev.slug;
                         return {
                           ...prev,
@@ -580,9 +589,9 @@ export default function Admin() {
                     onChange={(e) => {
                       const name = e.target.value;
                       setFormData(prev => {
-                        const prefix = prev.client_id_number ? `SD${prev.client_id_number}-` : '';
-                        const newSlug = !isSlugManuallyEdited 
-                          ? `${prefix}${name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim().replace(/[\s-]+/g, '-')}`
+                        const prefix = prev.client_id_number ? `sd${prev.client_id_number}` : 'sd';
+                        const newSlug = !isSlugManuallyEdited
+                          ? `${prefix}${name.toLowerCase().replace(/[^a-z0-9]/g, '')}`
                           : prev.slug;
                         return {
                           ...prev,
@@ -615,10 +624,13 @@ export default function Admin() {
                     value={formData.website_url}
                     onChange={(e) => {
                       const newUrl = e.target.value;
+                      const prevDomain = prev => prev.website_url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+                      const newDomain = newUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
                       setFormData(prev => ({
                         ...prev,
                         website_url: newUrl,
-                        psi_url: (prev.psi_url === prev.website_url || !prev.psi_url) ? newUrl : prev.psi_url
+                        psi_url: (prev.psi_url === prev.website_url || !prev.psi_url) ? newUrl : prev.psi_url,
+                        uptime_kuma_slug: (prev.uptime_kuma_slug === prevDomain(prev) || !prev.uptime_kuma_slug) ? newDomain : prev.uptime_kuma_slug,
                       }));
                     }}
                     placeholder="https://www.example.com"
@@ -646,38 +658,6 @@ export default function Admin() {
                 </div>
               </div>
 
-              <div className="border-t border-gray-200 pt-6">
-                <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wider">Contact Information</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">First Name</label>
-                    <input
-                      type="text"
-                      value={formData.contact_first_name}
-                      onChange={(e) => setFormData({ ...formData, contact_first_name: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Last Name</label>
-                    <input
-                      type="text"
-                      value={formData.contact_last_name}
-                      onChange={(e) => setFormData({ ...formData, contact_last_name: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Email Address</label>
-                    <input
-                      type="email"
-                      value={formData.contact_email}
-                      onChange={(e) => setFormData({ ...formData, contact_email: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
 
               <div className="border-t border-gray-200 pt-6">
                 <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wider">Enabled Pages</h3>
@@ -689,8 +669,9 @@ export default function Admin() {
                     { id: 4, name: 'Website Events' },
                     { id: 5, name: 'Search Performance' },
                     { id: 6, name: 'Page Speed' },
-                    { id: 7, name: 'Website Statistics' },
-                    { id: 8, name: 'Website Updates' },
+                    { id: 7, name: 'Uptime Monitor' },
+                    { id: 8, name: 'Website Statistics' },
+                    { id: 9, name: 'Website Updates' },
                   ].map(page => {
                     let enabledPages: number[] = [];
                     try {
@@ -860,6 +841,21 @@ export default function Admin() {
                     placeholder="e.g. https://www.example.com/"
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
                   />
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200 pt-6">
+                <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wider">Uptime Monitoring</h3>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">Monitor Name Filter</label>
+                  <input
+                    type="text"
+                    value={formData.uptime_kuma_slug}
+                    onChange={(e) => setFormData({ ...formData, uptime_kuma_slug: e.target.value })}
+                    placeholder="e.g. stokedesign.co"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Auto-filled from Website URL (domain only, no protocol). Matched case-insensitively against Uptime Kuma monitor names — e.g. <code className="bg-gray-100 px-1 rounded">stokedesign.co</code> matches <code className="bg-gray-100 px-1 rounded">https://stokedesign.co</code>.</p>
                 </div>
               </div>
 
