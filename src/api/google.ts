@@ -37,7 +37,6 @@ export const getAuthClient = async () => {
       scopes: [
         "https://www.googleapis.com/auth/analytics.readonly",
         "https://www.googleapis.com/auth/webmasters.readonly",
-        "https://www.googleapis.com/auth/bigquery.readonly",
       ],
     });
     return authClient;
@@ -217,37 +216,6 @@ export const fetchGSCData = async (
     }
 
     throw new Error(`Failed to fetch GSC data: ${error.message}`);
-  }
-};
-
-export const fetchBQData = async (
-  projectId: string,
-  datasetId: string,
-  tableId: string,
-) => {
-  const auth = await getAuthClient();
-  if (!auth) throw new Error("Google Auth not configured");
-
-  const bigquery = google.bigquery({ version: "v2", auth });
-
-  try {
-    // Example query: get the last 30 days of data if there's a date column,
-    // or just a simple SELECT * LIMIT 100 for demonstration.
-    // In a real app, this would be tailored to the specific table schema.
-    const query = `SELECT * FROM \`${projectId}.${datasetId}.${tableId}\` LIMIT 100`;
-
-    const response = await bigquery.jobs.query({
-      projectId,
-      requestBody: {
-        query,
-        useLegacySql: false,
-      },
-    });
-
-    return response.data;
-  } catch (error: any) {
-    console.error("BQ Error:", error.message);
-    throw new Error(`Failed to fetch BQ data: ${error.message}`);
   }
 };
 

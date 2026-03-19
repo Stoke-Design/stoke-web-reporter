@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
+
+const generateRandomSlug = (): string => {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+};
 import { Link } from 'react-router-dom';
-import { Plus, Edit2, Trash2, ExternalLink, LogOut, Loader2, Settings, Search, Users, CheckCircle2, XCircle } from 'lucide-react';
+import { Plus, Edit2, Trash2, ExternalLink, LogOut, Loader2, Settings, Search, Users, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 import { Logo } from '../components/Logo';
 
 interface Client {
@@ -9,17 +14,13 @@ interface Client {
   name: string;
   slug: string;
   website_url: string | null;
-  contact_first_name: string | null;
-  contact_last_name: string | null;
-  contact_email: string | null;
   enabled_pages: string | null;
   ga_property_id: string | null;
   gsc_site_url: string | null;
-  bq_project_id: string | null;
-  bq_dataset_id: string | null;
-  bq_table_id: string | null;
   psi_url: string | null;
   uptime_kuma_slug: string | null;
+  mainwp_site_id: string | null;
+  care_plan: string | null;
   is_active: number;
 }
 
@@ -42,19 +43,21 @@ export default function Admin() {
     name: '',
     slug: '',
     website_url: '',
-    contact_first_name: '',
-    contact_last_name: '',
-    contact_email: '',
-    enabled_pages: '[1,2,3,4,5,6,7]',
+
+    enabled_pages: '[1,2,3,4,5,6,7,8,9]',
     ga_property_id: '',
     gsc_site_url: '',
-    bq_project_id: '',
-    bq_dataset_id: '',
-    bq_table_id: '',
     psi_url: '',
     uptime_kuma_slug: '',
+    mainwp_site_id: '',
+    care_plan: '',
     is_active: 1,
   });
+
+  const [hubspotSyncing, setHubspotSyncing] = useState(false);
+  const [hubspotSyncMsg, setHubspotSyncMsg] = useState('');
+  const [hubspotSyncAllRunning, setHubspotSyncAllRunning] = useState(false);
+  const [hubspotSyncAllMsg, setHubspotSyncAllMsg] = useState('');
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -89,17 +92,14 @@ export default function Admin() {
         name: client.name,
         slug: client.slug,
         website_url: client.website_url || '',
-        contact_first_name: client.contact_first_name || '',
-        contact_last_name: client.contact_last_name || '',
-        contact_email: client.contact_email || '',
-        enabled_pages: client.enabled_pages || '[1,2,3,4,5,6]',
+
+        enabled_pages: client.enabled_pages || '[1,2,3,4,5,6,7,8,9]',
         ga_property_id: client.ga_property_id || '',
         gsc_site_url: client.gsc_site_url || '',
-        bq_project_id: client.bq_project_id || '',
-        bq_dataset_id: client.bq_dataset_id || '',
-        bq_table_id: client.bq_table_id || '',
         psi_url: client.psi_url || '',
         uptime_kuma_slug: client.uptime_kuma_slug || '',
+        mainwp_site_id: client.mainwp_site_id || '',
+        care_plan: client.care_plan || '',
         is_active: client.is_active,
       });
     } else {
@@ -108,22 +108,19 @@ export default function Admin() {
       setFormData({
         client_id_number: '',
         name: '',
-        slug: '',
+        slug: generateRandomSlug(),
         website_url: '',
-        contact_first_name: '',
-        contact_last_name: '',
-        contact_email: '',
-        enabled_pages: '[1,2,3,4,5,6,7]',
+        enabled_pages: '[1,2,3,4,5,6,7,8,9]',
         ga_property_id: '',
         gsc_site_url: '',
-        bq_project_id: '',
-        bq_dataset_id: '',
-        bq_table_id: '',
         psi_url: '',
         uptime_kuma_slug: '',
+        mainwp_site_id: '',
+        care_plan: '',
         is_active: 1,
       });
     }
+    setHubspotSyncMsg('');
     setIsModalOpen(true);
   };
 
@@ -165,6 +162,22 @@ export default function Admin() {
     }
   };
 
+  const handleSyncAllHubSpot = async () => {
+    setHubspotSyncAllRunning(true);
+    setHubspotSyncAllMsg('Syncing...');
+    try {
+      const res = await fetch('/api/admin/hubspot-sync-all', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Sync failed');
+      setHubspotSyncAllMsg(`✓ ${data.synced} synced, ${data.skipped} skipped, ${data.errors} errors`);
+      await fetchClients(); // Refresh to show updated sync status
+    } catch (err: any) {
+      setHubspotSyncAllMsg('✗ ' + err.message);
+    } finally {
+      setHubspotSyncAllRunning(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -180,7 +193,10 @@ export default function Admin() {
         body: JSON.stringify(formData),
       });
       
-      if (!res.ok) throw new Error('Failed to save client');
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed to save client');
+      }
       
       await fetchClients();
       setIsModalOpen(false);
@@ -392,7 +408,22 @@ export default function Admin() {
         {error && <div className="mb-6 p-4 bg-red-900/20 text-red-400 rounded-xl">{error}</div>}
 
         <div className="bg-white rounded-2xl shadow-none border border-gray-200 overflow-hidden">
-          <div className="p-4 border-b border-gray-200 flex justify-end">
+          <div className="p-4 border-b border-gray-200 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleSyncAllHubSpot}
+                disabled={hubspotSyncAllRunning}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-600 text-white text-xs font-medium rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50"
+              >
+                {hubspotSyncAllRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                Sync All HubSpot
+              </button>
+              {hubspotSyncAllMsg && (
+                <span className={`text-xs ${hubspotSyncAllMsg.startsWith('✓') ? 'text-emerald-600' : hubspotSyncAllMsg.startsWith('✗') ? 'text-red-600' : 'text-gray-500'}`}>
+                  {hubspotSyncAllMsg}
+                </span>
+              )}
+            </div>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as any)}
@@ -415,7 +446,6 @@ export default function Admin() {
                   />
                 </th>
                 <th className="p-4 font-medium">Status</th>
-                <th className="p-4 font-medium">Client ID</th>
                 <th className="p-4 font-medium">Client Name</th>
                 <th className="p-4 font-medium">Slug / Link</th>
                 <th className="p-4 font-medium">Configured Data</th>
@@ -461,7 +491,6 @@ export default function Admin() {
                         />
                       </button>
                     </td>
-                    <td className="p-4 font-medium text-gray-400">{client.client_id_number ? `SD${client.client_id_number}` : '-'}</td>
                     <td className="p-4 font-medium text-gray-900">{client.name}</td>
                     <td className="p-4 text-gray-500">
                       <Link to={`/${client.slug}`} target="_blank" className="flex items-center hover:text-gray-900 transition-colors">
@@ -473,10 +502,20 @@ export default function Admin() {
                       <div className="flex gap-2">
                         {client.ga_property_id && <span className="px-2 py-1 bg-blue-900/20 text-blue-300 text-xs rounded-md font-medium">GA</span>}
                         {client.gsc_site_url && <span className="px-2 py-1 bg-purple-900/20 text-purple-700 text-xs rounded-md font-medium">GSC</span>}
-                        {client.bq_project_id && <span className="px-2 py-1 bg-orange-50 text-orange-700 text-xs rounded-md font-medium">BQ</span>}
                         {client.psi_url && <span className="px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md font-medium">PSI</span>}
                         {client.uptime_kuma_slug && <span className="px-2 py-1 bg-emerald-50 text-emerald-700 text-xs rounded-md font-medium">Uptime</span>}
-                        {!client.ga_property_id && !client.gsc_site_url && !client.bq_project_id && !client.psi_url && !client.uptime_kuma_slug && (
+                        {client.website_url && client.care_plan && (
+                          <span className="px-2 py-1 bg-emerald-50 text-emerald-700 text-xs rounded-md font-medium flex items-center gap-1" title={`Synced — Care Plan: ${client.care_plan}`}>
+                            <CheckCircle2 className="w-3 h-3" />HubSpot
+                          </span>
+                        )}
+                        {client.website_url && !client.care_plan && (
+                          <span className="px-2 py-1 bg-orange-50 text-orange-600 border border-orange-200 text-xs rounded-md font-medium flex items-center gap-1" title="Not synced — no care plan pulled">
+                            <XCircle className="w-3 h-3" />HubSpot
+                          </span>
+                        )}
+                        {client.mainwp_site_id && <span className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-md font-medium">MainWP</span>}
+                        {!client.ga_property_id && !client.gsc_site_url && !client.psi_url && !client.uptime_kuma_slug && !client.website_url && !client.mainwp_site_id && (
                           <span className="text-gray-400 text-sm italic">None</span>
                         )}
                       </div>
@@ -559,47 +598,11 @@ export default function Admin() {
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Client ID Number</label>
-                  <input
-                    type="text"
-                    value={formData.client_id_number}
-                    onChange={(e) => {
-                      const clientId = e.target.value;
-                      setFormData(prev => {
-                        const newSlug = !isSlugManuallyEdited && prev.name
-                          ? `sd${clientId}${prev.name.toLowerCase().replace(/[^a-z0-9]/g, '')}`
-                          : prev.slug;
-                        return {
-                          ...prev,
-                          client_id_number: clientId,
-                          slug: newSlug
-                        };
-                      });
-                    }}
-                    placeholder="e.g. 123"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">1-3 digit number (e.g. 123)</p>
-                </div>
-                <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">Client Name *</label>
                     <input
                     type="text"
                     value={formData.name}
-                    onChange={(e) => {
-                      const name = e.target.value;
-                      setFormData(prev => {
-                        const prefix = prev.client_id_number ? `sd${prev.client_id_number}` : 'sd';
-                        const newSlug = !isSlugManuallyEdited
-                          ? `${prefix}${name.toLowerCase().replace(/[^a-z0-9]/g, '')}`
-                          : prev.slug;
-                        return {
-                          ...prev,
-                          name,
-                          slug: newSlug
-                        };
-                      });
-                    }}
+                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
                     required
                   />
@@ -637,6 +640,28 @@ export default function Admin() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
                   />
                 </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Care Plan</label>
+                  <div className="flex items-center gap-2">
+                    {formData.care_plan && (
+                      <span className={`inline-block w-4 h-4 rounded-full shrink-0 ${
+                        formData.care_plan.toLowerCase() === 'pink' ? 'bg-pink-400' :
+                        formData.care_plan.toLowerCase() === 'black' ? 'bg-gray-900' :
+                        formData.care_plan.toLowerCase() === 'white' ? 'bg-white border border-gray-300' : ''
+                      }`} />
+                    )}
+                    <select
+                      value={formData.care_plan}
+                      onChange={e => setFormData({ ...formData, care_plan: e.target.value })}
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                    >
+                      <option value="">Not set</option>
+                      <option value="Pink">Pink</option>
+                      <option value="White">White</option>
+                      <option value="Black">Black</option>
+                    </select>
+                  </div>
+                </div>
                 <div className="md:col-span-2 flex items-center justify-between p-4 bg-gray-50 border border-gray-200 rounded-xl">
                   <div>
                     <h3 className="text-sm font-medium text-gray-900">Active Client</h3>
@@ -663,15 +688,15 @@ export default function Admin() {
                 <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wider">Enabled Pages</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[
-                    { id: 1, name: 'Analytics Overview' },
-                    { id: 2, name: 'Traffic Sources' },
-                    { id: 3, name: 'Pages & Landing Pages' },
-                    { id: 4, name: 'Website Events' },
-                    { id: 5, name: 'Search Performance' },
-                    { id: 6, name: 'Page Speed' },
-                    { id: 7, name: 'Uptime Monitor' },
-                    { id: 8, name: 'Website Statistics' },
-                    { id: 9, name: 'Website Updates' },
+                    { id: 1, name: 'Report Overview' },
+                    { id: 2, name: 'Website Analytics' },
+                    { id: 3, name: 'Traffic Sources' },
+                    { id: 4, name: 'Pages & Landing Pages' },
+                    { id: 5, name: 'Website Events' },
+                    { id: 6, name: 'Search Performance' },
+                    { id: 7, name: 'Page Speed' },
+                    { id: 8, name: 'Uptime Monitor' },
+                    { id: 9, name: 'WP Updates & Stats' },
                   ].map(page => {
                     let enabledPages: number[] = [];
                     try {
@@ -798,39 +823,6 @@ export default function Admin() {
               </div>
 
               <div className="border-t border-gray-200 pt-6">
-                <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wider">BigQuery</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Project ID</label>
-                    <input
-                      type="text"
-                      value={formData.bq_project_id}
-                      onChange={(e) => setFormData({ ...formData, bq_project_id: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Dataset ID</label>
-                    <input
-                      type="text"
-                      value={formData.bq_dataset_id}
-                      onChange={(e) => setFormData({ ...formData, bq_dataset_id: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Table ID</label>
-                    <input
-                      type="text"
-                      value={formData.bq_table_id}
-                      onChange={(e) => setFormData({ ...formData, bq_table_id: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="border-t border-gray-200 pt-6">
                 <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wider">PageSpeed Insights</h3>
                 <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">URL to Test</label>
@@ -856,6 +848,61 @@ export default function Admin() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
                   />
                   <p className="text-xs text-gray-500 mt-1">Auto-filled from Website URL (domain only, no protocol). Matched case-insensitively against Uptime Kuma monitor names — e.g. <code className="bg-gray-100 px-1 rounded">stokedesign.co</code> matches <code className="bg-gray-100 px-1 rounded">https://stokedesign.co</code>.</p>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200 pt-6">
+                <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wider">HubSpot CRM</h3>
+                <div>
+                  <p className="text-xs text-gray-500 mb-3">HubSpot subscription records are matched automatically by Website URL. The report URL is pushed to the <code className="bg-gray-100 px-1 rounded">report_url</code> property, and the care plan is synced back whenever the client dashboard is viewed or a manual sync is run.</p>
+                  {editingClient && formData.website_url && (
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        disabled={hubspotSyncing}
+                        onClick={async () => {
+                          setHubspotSyncing(true);
+                          setHubspotSyncMsg('');
+                          try {
+                            const res = await fetch(`/api/admin/clients/${editingClient.id}/hubspot-sync`, { method: 'POST' });
+                            const data = await res.json();
+                            if (!res.ok) throw new Error(data.error || 'Sync failed');
+                            setHubspotSyncMsg('✓ Synced successfully');
+                          } catch (err: any) {
+                            setHubspotSyncMsg('✗ ' + err.message);
+                          } finally {
+                            setHubspotSyncing(false);
+                          }
+                        }}
+                        className="px-3 py-2 bg-orange-600 text-white text-xs font-medium rounded-xl hover:bg-orange-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+                      >
+                        {hubspotSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                        Sync Now
+                      </button>
+                      {hubspotSyncMsg && <p className={`text-xs ${hubspotSyncMsg.startsWith('✓') ? 'text-emerald-600' : 'text-red-600'}`}>{hubspotSyncMsg}</p>}
+                    </div>
+                  )}
+                  {editingClient && !formData.website_url && (
+                    <p className="text-xs text-amber-600">Set a Website URL above to enable HubSpot sync.</p>
+                  )}
+                  {!editingClient && (
+                    <p className="text-xs text-gray-400">Save the client first to enable HubSpot sync.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200 pt-6">
+                <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wider">MainWP</h3>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">MainWP Site ID</label>
+                  <input
+                    type="text"
+                    value={formData.mainwp_site_id}
+                    onChange={(e) => setFormData({ ...formData, mainwp_site_id: e.target.value })}
+                    placeholder="e.g. 42"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Numeric site ID from your MainWP dashboard. Powers the Website Updates &amp; Stats page.</p>
                 </div>
               </div>
 

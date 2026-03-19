@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Key, FileJson, AlertCircle, Database, Download, Upload, Plus, Users, Tag, Bot, Activity } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Key, FileJson, AlertCircle, Database, Download, Upload, Plus, Users, Tag, Bot, Activity, Share2, Server } from 'lucide-react';
 
 const PAGE_TITLE = 'Stoke Design Website Reporter';
 
@@ -28,6 +28,14 @@ export default function Settings() {
     uptime_kuma_url: '',
     uptime_kuma_username: '',
     uptime_kuma_password: '',
+    webhook_url: '',
+    webhook_secret: '',
+    webhook_inbound_token: '',
+    webhook_events_enabled: '["client.created","client.updated","psi.completed","uptime.alert","report.viewed"]',
+    hubspot_access_token: '',
+    hubspot_client_secret: '',
+    mainwp_url: '',
+    mainwp_api_key: '',
   });
 
   useEffect(() => {
@@ -65,6 +73,14 @@ export default function Settings() {
         uptime_kuma_url: data.uptime_kuma_url || '',
         uptime_kuma_username: data.uptime_kuma_username || '',
         uptime_kuma_password: data.uptime_kuma_password || '',
+        webhook_url: data.webhook_url || '',
+        webhook_secret: data.webhook_secret || '',
+        webhook_inbound_token: data.webhook_inbound_token || '',
+        webhook_events_enabled: data.webhook_events_enabled || '["client.created","client.updated","psi.completed","uptime.alert","report.viewed"]',
+        hubspot_access_token: data.hubspot_access_token || '',
+        hubspot_client_secret: data.hubspot_client_secret || '',
+        mainwp_url: data.mainwp_url || '',
+        mainwp_api_key: data.mainwp_api_key || '',
       });
     } catch (err: any) {
       setError(err.message);
@@ -111,8 +127,8 @@ export default function Settings() {
   };
 
   const downloadTemplateCSV = () => {
-    const headers = ['client_id_number', 'name', 'slug', 'website_url', 'contact_first_name', 'contact_last_name', 'contact_email', 'enabled_pages', 'ga_property_id', 'gsc_site_url', 'bq_project_id', 'bq_dataset_id', 'bq_table_id', 'psi_url'];
-    const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n" + "123,Example Client,example-client,https://example.com,John,Doe,john@example.com,\"[1,2,3,4,5,6,7,8]\",,,,,,";
+    const headers = ['name', 'slug', 'website_url', 'enabled_pages', 'ga_property_id', 'gsc_site_url', 'psi_url', 'uptime_kuma_slug', 'mainwp_site_id'];
+    const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n" + "123,Example Client,example-client,https://example.com,John,Doe,john@example.com,\"[1,2,3,4,5,6,7,8,9]\",,,,,,";
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -189,7 +205,7 @@ export default function Settings() {
       for (let i = 1; i < rows.length; i++) {
         if (rows[i].length !== headers.length) continue;
         const clientData: any = {
-          client_id_number: '', name: '', slug: '', website_url: '', contact_first_name: '', contact_last_name: '', contact_email: '', enabled_pages: '[1,2,3,4,5,6,7,8]', ga_property_id: '', gsc_site_url: '', bq_project_id: '', bq_dataset_id: '', bq_table_id: '', psi_url: '',
+          name: '', slug: '', website_url: '', enabled_pages: '[1,2,3,4,5,6,7,8,9]', ga_property_id: '', gsc_site_url: '', psi_url: '', uptime_kuma_slug: '', mainwp_site_id: '',
         };
         headers.forEach((header, index) => {
           if (clientData.hasOwnProperty(header)) {
@@ -198,7 +214,7 @@ export default function Settings() {
         });
         if (clientData.name && clientData.slug) {
           if (!clientData.enabled_pages) {
-            clientData.enabled_pages = '[1,2,3,4,5,6,7,8]';
+            clientData.enabled_pages = '[1,2,3,4,5,6,7,8,9]';
           }
           clientsToImport.push(clientData);
         }
@@ -267,7 +283,7 @@ export default function Settings() {
                   </div>
                   <div>
                     <h2 className="text-lg font-semibold text-gray-900">Google Service Account</h2>
-                    <p className="text-sm text-gray-500">Required for Google Analytics, Search Console, and BigQuery access.</p>
+                    <p className="text-sm text-gray-500">Required for Google Analytics and Search Console access.</p>
                   </div>
                 </div>
                 
@@ -287,10 +303,10 @@ export default function Settings() {
                       const json = JSON.parse(formData.google_service_account_json);
                       if (json.client_email) {
                         return (
-                          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-                            <h4 className="text-sm font-semibold text-blue-900 mb-2">Service Account Email</h4>
+                          <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-xl">
+                            <h4 className="text-sm font-semibold text-gray-900 mb-2">Service Account Email</h4>
                             <div className="flex items-center gap-2">
-                              <code className="flex-1 p-2 bg-white rounded border border-blue-200 text-xs font-mono text-gray-800 break-all">
+                              <code className="flex-1 p-2 bg-white rounded border border-gray-200 text-xs font-mono text-gray-900 break-all">
                                 {json.client_email}
                               </code>
                               <button
@@ -299,13 +315,13 @@ export default function Settings() {
                                   navigator.clipboard.writeText(json.client_email);
                                   alert('Email copied to clipboard!');
                                 }}
-                                className="px-3 py-2 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                                className="px-3 py-2 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-700 transition-colors"
                               >
                                 Copy
                               </button>
                             </div>
-                            <p className="mt-2 text-xs text-blue-800">
-                              <strong>Action Required:</strong> To fix "sufficient permission" errors, add this email as a User (with 'Full' or 'Restricted' permissions) in your <a href="https://search.google.com/search-console/users" target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-900">Google Search Console settings</a>.
+                            <p className="mt-2 text-xs text-gray-700">
+                              <strong>Action Required:</strong> To fix "sufficient permission" errors, add this email as a User (with 'Full' or 'Restricted' permissions) in your <a href="https://search.google.com/search-console/users" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-900">Google Search Console settings</a>.
                             </p>
                           </div>
                         );
@@ -529,6 +545,164 @@ export default function Settings() {
 
               <div className="border-t border-gray-200"></div>
 
+              {/* Webhooks Section */}
+              <section>
+                <div className="flex items-start gap-4 mb-4">
+                  <div className="p-3 bg-indigo-900/20 text-indigo-400 rounded-xl">
+                    <Share2 className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Webhooks</h2>
+                    <p className="text-sm text-gray-500">Connect to n8n or other automation tools with bidirectional webhooks.</p>
+                  </div>
+                </div>
+                <div className="ml-16 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">Outbound Webhook URL</label>
+                    <input
+                      type="url"
+                      value={formData.webhook_url}
+                      onChange={(e) => setFormData({ ...formData, webhook_url: e.target.value })}
+                      placeholder="https://n8n.example.com/webhook/abc123"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-2">Outbound Secret</label>
+                      <input
+                        type="password"
+                        value={formData.webhook_secret}
+                        onChange={(e) => setFormData({ ...formData, webhook_secret: e.target.value })}
+                        placeholder="Sent as X-Webhook-Secret header"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-2">Inbound Token</label>
+                      <input
+                        type="password"
+                        value={formData.webhook_inbound_token}
+                        onChange={(e) => setFormData({ ...formData, webhook_inbound_token: e.target.value })}
+                        placeholder="Required as X-Webhook-Token header"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">Enabled Outbound Events</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(['client.created', 'client.updated', 'psi.completed', 'uptime.alert', 'report.viewed'] as const).map(evt => {
+                        let enabled: string[] = [];
+                        try { enabled = JSON.parse(formData.webhook_events_enabled); } catch {}
+                        const checked = enabled.includes(evt);
+                        return (
+                          <label key={evt} className="flex items-center gap-2 p-2 border border-gray-200 rounded-xl hover:bg-gray-50 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                let next = [...enabled];
+                                if (e.target.checked) next.push(evt);
+                                else next = next.filter(x => x !== evt);
+                                setFormData({ ...formData, webhook_events_enabled: JSON.stringify(next) });
+                              }}
+                              className="w-4 h-4 text-gray-900 rounded border-gray-300 focus:ring-gray-900"
+                            />
+                            <code className="text-xs text-gray-700">{evt}</code>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    <strong>Inbound:</strong> POST to <code className="bg-gray-100 px-1 rounded">/api/webhook</code> with <code className="bg-gray-100 px-1 rounded">X-Webhook-Token</code> header. Actions: <code className="bg-gray-100 px-1 rounded">refresh_psi</code>, <code className="bg-gray-100 px-1 rounded">update_client</code>, <code className="bg-gray-100 px-1 rounded">post_notification</code>.
+                  </p>
+                </div>
+              </section>
+
+              <div className="border-t border-gray-200"></div>
+
+              {/* HubSpot CRM Section */}
+              <section>
+                <div className="flex items-start gap-4 mb-4">
+                  <div className="p-3 bg-orange-900/20 text-orange-400 rounded-xl">
+                    <Users className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">HubSpot CRM</h2>
+                    <p className="text-sm text-gray-500">Sync subscription records — push report URLs to HubSpot and pull care plan data back automatically.</p>
+                  </div>
+                </div>
+                <div className="ml-16 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">Private App Access Token</label>
+                    <input
+                      type="password"
+                      value={formData.hubspot_access_token}
+                      onChange={(e) => setFormData({ ...formData, hubspot_access_token: e.target.value })}
+                      placeholder="pat-api1-..."
+                      className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">Client Secret</label>
+                    <input
+                      type="password"
+                      value={formData.hubspot_client_secret}
+                      onChange={(e) => setFormData({ ...formData, hubspot_client_secret: e.target.value })}
+                      placeholder="••••••••-••••-••••-••••-••••••••••••"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Create a Private App in HubSpot Settings → Integrations. Copy the <strong>Access Token</strong> and <strong>Client Secret</strong> from the app credentials page. Subscription records are matched by the <code className="bg-gray-100 px-1 rounded">website_url</code> property. The report URL is pushed to <code className="bg-gray-100 px-1 rounded">report_url</code> and the care plan is synced back whenever a client dashboard is viewed or a manual sync is triggered.
+                  </p>
+                </div>
+              </section>
+
+              <div className="border-t border-gray-200"></div>
+
+              {/* MainWP Section */}
+              <section>
+                <div className="flex items-start gap-4 mb-4">
+                  <div className="p-3 bg-blue-900/20 text-blue-400 rounded-xl">
+                    <Server className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">MainWP</h2>
+                    <p className="text-sm text-gray-500">Pull WordPress site data (plugin/theme updates, WP version) from your MainWP dashboard.</p>
+                  </div>
+                </div>
+                <div className="ml-16 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">MainWP Dashboard URL</label>
+                    <input
+                      type="url"
+                      value={formData.mainwp_url}
+                      onChange={(e) => setFormData({ ...formData, mainwp_url: e.target.value })}
+                      placeholder="https://manage.example.com"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">API Key</label>
+                    <input
+                      type="password"
+                      value={formData.mainwp_api_key}
+                      onChange={(e) => setFormData({ ...formData, mainwp_api_key: e.target.value })}
+                      placeholder="Your MainWP REST API key"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Generate your API key under <strong>MainWP → Settings → REST API</strong>. Set the <strong>MainWP Site ID</strong> per client in Admin to activate the Website Statistics and Updates pages.
+                  </p>
+                </div>
+              </section>
+
+              <div className="border-t border-gray-200"></div>
+
               {/* Data Management Section */}
               <section>
                 <div className="flex items-start gap-4 mb-4">
@@ -631,12 +805,10 @@ export default function Settings() {
                           <div>
                             <span className="block text-xs font-medium text-gray-400 mb-1">Current Data</span>
                             <div className="truncate" title={conflict.existing.website_url || 'N/A'}>URL: {conflict.existing.website_url || 'N/A'}</div>
-                            <div className="truncate" title={conflict.existing.contact_email || 'N/A'}>Email: {conflict.existing.contact_email || 'N/A'}</div>
                           </div>
                           <div>
                             <span className="block text-xs font-medium text-gray-400 mb-1">Imported Data</span>
                             <div className="truncate" title={conflict.imported.website_url || 'N/A'}>URL: {conflict.imported.website_url || 'N/A'}</div>
-                            <div className="truncate" title={conflict.imported.contact_email || 'N/A'}>Email: {conflict.imported.contact_email || 'N/A'}</div>
                           </div>
                         </div>
                       </div>

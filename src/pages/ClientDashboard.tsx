@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
-import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Legend, AreaChart, Area
 } from 'recharts';
 import { format, subDays, parseISO } from 'date-fns';
@@ -11,7 +11,7 @@ import {
   LayoutDashboard, Share2, FileText, Zap, Gauge, Database, RefreshCw, ChevronRight,
   Calendar, Globe, ArrowUpRight, ArrowDownRight, Activity, Clock, Layers,
   Info, CheckCircle, AlertTriangle, Megaphone, Bell, Sparkles, Phone, Mail,
-  Wifi, WifiOff, Timer
+  Wifi, WifiOff, Timer, ClipboardList
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import html2canvas from 'html2canvas';
@@ -26,12 +26,13 @@ interface ClientInfo {
   name: string;
   slug: string;
   website_url: string | null;
-  contact_first_name: string | null;
   hasGA: boolean;
   hasGSC: boolean;
-  hasBQ: boolean;
   hasPSI: boolean;
   hasUptime: boolean;
+  hasMainWP: boolean;
+  hasHubSpot: boolean;
+  care_plan: string | null;
   global_notification: string | null;
   global_notification_icon: string | null;
   global_notification_color: string | null;
@@ -58,10 +59,6 @@ export default function ClientDashboard() {
   const [gscLoading, setGscLoading] = useState(false);
   const [gscError, setGscError] = useState('');
 
-  const [bqData, setBqData] = useState<any>(null);
-  const [bqLoading, setBqLoading] = useState(false);
-  const [bqError, setBqError] = useState('');
-
   const [psiData, setPsiData] = useState<any>(null);
   const [psiHistory, setPsiHistory] = useState<any[]>([]);
   const [psiLoading, setPsiLoading] = useState(false);
@@ -71,6 +68,18 @@ export default function ClientDashboard() {
   const [uptimeData, setUptimeData] = useState<any>(null);
   const [uptimeLoading, setUptimeLoading] = useState(false);
   const [uptimeError, setUptimeError] = useState('');
+
+  const [mainwpData, setMainwpData] = useState<any>(null);
+  const [mainwpLoading, setMainwpLoading] = useState(false);
+  const [mainwpError, setMainwpError] = useState('');
+
+  const [hubspotData, setHubspotData] = useState<any>(null);
+  const [hubspotLoading, setHubspotLoading] = useState(false);
+  const [hubspotError, setHubspotError] = useState('');
+
+  const [reportOverviewData, setReportOverviewData] = useState<any>(null);
+  const [reportOverviewLoading, setReportOverviewLoading] = useState(false);
+  const [reportOverviewError, setReportOverviewError] = useState('');
 
   const [dateRange, setDateRange] = useState('30daysAgo');
   const [aiSummary, setAiSummary] = useState('');
@@ -85,29 +94,38 @@ export default function ClientDashboard() {
   useEffect(() => {
     if (client) {
       if (dateRange === 'custom' && (!customStartDate || !customEndDate)) return;
-      
+
+      if (activePage === 1) {
+        fetchReportOverview();
+      }
+
       if (client.hasGA) {
-        if (activePage === 0 || activePage === 1) {
+        if (activePage === 0 || activePage === 2) {
           fetchGA('overview');
           fetchGA('overview_extended');
-        } else if (activePage === 2) {
-          fetchGA('traffic_sources');
         } else if (activePage === 3) {
+          fetchGA('traffic_sources');
+        } else if (activePage === 4) {
           fetchGA('pages');
           fetchGA('landing_pages');
-        } else if (activePage === 4) {
+        } else if (activePage === 5) {
           fetchGA('events');
         }
       }
-      
-      if (client.hasGSC && (activePage === 0 || activePage === 5)) fetchGSC();
-      if (client.hasBQ && (activePage === 8 || activePage === 9)) fetchBQ();
-      if (client.hasPSI && (activePage === 0 || activePage === 6)) {
+
+      if (client.hasGSC && (activePage === 0 || activePage === 6)) fetchGSC();
+      if (client.hasPSI && (activePage === 0 || activePage === 7)) {
         fetchPSI();
         fetchPSIHistory();
       }
-      if (client.hasUptime && activePage === 7) {
+      if (client.hasUptime && activePage === 8) {
         fetchUptime();
+      }
+      if (client.hasMainWP && activePage === 9) {
+        fetchMainWP();
+      }
+      if (client.hasHubSpot && activePage === 0) {
+        fetchHubSpot();
       }
     }
   }, [client, dateRange, customStartDate, customEndDate, activePage]);
@@ -139,18 +157,18 @@ export default function ClientDashboard() {
     try {
       let startDate = '30daysAgo';
       let endDate = 'today';
-      
+
       if (dateRange === '90daysAgo') startDate = '90daysAgo';
       if (dateRange === '365daysAgo') startDate = '365daysAgo';
       if (dateRange === 'custom') {
         startDate = customStartDate;
         endDate = customEndDate;
       }
-      
+
       const res = await fetch(`/api/client/${slug}/ga?startDate=${startDate}&endDate=${endDate}&reportType=${reportType}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to fetch GA data');
-      
+
       if (reportType === 'overview') setGaData(data);
       else if (reportType === 'overview_extended') setGaExtendedData(data);
       else if (reportType === 'traffic_sources') setGaTrafficData(data);
@@ -171,14 +189,14 @@ export default function ClientDashboard() {
     try {
       let endDate = formatInTimeZone(new Date(), TIMEZONE, 'yyyy-MM-dd');
       let startDate = formatInTimeZone(subDays(new Date(), 30), TIMEZONE, 'yyyy-MM-dd');
-      
+
       if (dateRange === '90daysAgo') startDate = formatInTimeZone(subDays(new Date(), 90), TIMEZONE, 'yyyy-MM-dd');
       if (dateRange === '365daysAgo') startDate = formatInTimeZone(subDays(new Date(), 365), TIMEZONE, 'yyyy-MM-dd');
       if (dateRange === 'custom') {
         startDate = customStartDate;
         endDate = customEndDate;
       }
-      
+
       const res = await fetch(`/api/client/${slug}/gsc?startDate=${startDate}&endDate=${endDate}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to fetch GSC data');
@@ -187,21 +205,6 @@ export default function ClientDashboard() {
       setGscError(err.message);
     } finally {
       setGscLoading(false);
-    }
-  };
-
-  const fetchBQ = async () => {
-    setBqLoading(true);
-    setBqError('');
-    try {
-      const res = await fetch(`/api/client/${slug}/bq`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to fetch BQ data');
-      setBqData(data);
-    } catch (err: any) {
-      setBqError(err.message);
-    } finally {
-      setBqLoading(false);
     }
   };
 
@@ -217,6 +220,52 @@ export default function ClientDashboard() {
       setUptimeError(err.message);
     } finally {
       setUptimeLoading(false);
+    }
+  };
+
+  const fetchMainWP = async () => {
+    setMainwpLoading(true);
+    setMainwpError('');
+    try {
+      const res = await fetch(`/api/client/${slug}/mainwp`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to fetch MainWP data');
+      setMainwpData(data);
+    } catch (err: any) {
+      setMainwpError(err.message);
+    } finally {
+      setMainwpLoading(false);
+    }
+  };
+
+  const fetchHubSpot = async () => {
+    setHubspotLoading(true);
+    setHubspotError('');
+    try {
+      const res = await fetch(`/api/client/${slug}/hubspot`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to fetch HubSpot data');
+      setHubspotData(data);
+    } catch (err: any) {
+      setHubspotError(err.message);
+    } finally {
+      setHubspotLoading(false);
+    }
+  };
+
+  const fetchReportOverview = async () => {
+    if (reportOverviewData) return; // already loaded — no need to re-fetch (Anthropic costs money)
+    setReportOverviewLoading(true);
+    setReportOverviewError('');
+    try {
+      const res = await fetch(`/api/client/${slug}/report-overview`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to generate report overview');
+      setReportOverviewData(data);
+    } catch (err: any) {
+      setReportOverviewError(err.message);
+    } finally {
+      setReportOverviewLoading(false);
     }
   };
 
@@ -253,7 +302,7 @@ export default function ClientDashboard() {
     try {
       const ai = new GoogleGenAI({ apiKey: (process.env as any).GEMINI_API_KEY });
       const model = "gemini-3-flash-preview";
-      
+
       const gaMetrics = gaExtendedData?.rows?.[0]?.metricValues || [];
       const gscMetrics = gscData?.rows || [];
       const psiMetrics = psiData?.lighthouseResult?.categories || {};
@@ -262,8 +311,8 @@ export default function ClientDashboard() {
         As an expert business consultant, provide a concise, easy-to-understand summary of the following website performance data for a business owner.
         Keep the summary under 300 words. Focus on what these numbers mean for their business growth and customer engagement.
         
-        IMPORTANT: Start the response with a friendly greeting addressing the client by their first name.
-        For example: "Hey ${client.contact_first_name || 'there'}, this month..."
+        IMPORTANT: Start the response with a friendly greeting addressing the client by name.
+        For example: "Hey ${client.name || 'there'}, this month..."
         
         Client Name: ${client.name}
         
@@ -316,7 +365,7 @@ export default function ClientDashboard() {
               </div>
               <h3 className="text-2xl font-bold text-gray-900">AI Insights Overview</h3>
             </div>
-            
+
             {aiLoading ? (
               <div className="py-12 flex flex-col items-center justify-center text-gray-400">
                 <Loader2 className="w-8 h-8 animate-spin mb-4 text-gray-900" />
@@ -331,6 +380,45 @@ export default function ClientDashboard() {
             )}
           </div>
         </div>
+
+        {client?.hasHubSpot && (
+          hubspotLoading ? (
+            <div className="bg-white p-6 rounded-3xl border border-gray-200 flex items-center gap-3 text-gray-400">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span className="text-sm">Loading account info...</span>
+            </div>
+          ) : hubspotData ? (
+            <div className="bg-white p-6 rounded-3xl border border-gray-200">
+              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Account Info</h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {(hubspotData.firstName || hubspotData.lastName) && (
+                  <div>
+                    <p className="text-xs text-gray-400 mb-1">Contact</p>
+                    <p className="text-sm font-semibold text-gray-900">{[hubspotData.firstName, hubspotData.lastName].filter(Boolean).join(' ')}</p>
+                  </div>
+                )}
+                {hubspotData.email && (
+                  <div>
+                    <p className="text-xs text-gray-400 mb-1">Email</p>
+                    <p className="text-sm font-semibold text-gray-900 truncate">{hubspotData.email}</p>
+                  </div>
+                )}
+                {hubspotData.nextReviewDate && (
+                  <div>
+                    <p className="text-xs text-gray-400 mb-1">Next Review</p>
+                    <p className="text-sm font-semibold text-gray-900">{new Date(hubspotData.nextReviewDate).toLocaleDateString()}</p>
+                  </div>
+                )}
+                {hubspotData.plan && (
+                  <div>
+                    <p className="text-xs text-gray-400 mb-1">Plan</p>
+                    <p className="text-sm font-semibold text-gray-900">{hubspotData.plan}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null
+        )}
 
         <div className="bg-gray-900 text-white p-8 rounded-3xl shadow-none relative overflow-hidden">
           <div className="absolute bottom-0 right-0 w-48 h-48 bg-white/10 rounded-full -mb-24 -mr-24 blur-2xl"></div>
@@ -376,7 +464,7 @@ export default function ClientDashboard() {
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
-      
+
       const imgProps = pdf.getImageProperties(imgData);
       const pdfImgHeight = (imgProps.height * pdfWidth) / imgProps.width;
 
@@ -425,20 +513,20 @@ export default function ClientDashboard() {
 
   const allPages = [
     { id: 0, name: 'AI Insights Overview', icon: Sparkles, source: 'AI' },
-    { id: 1, name: 'Analytics Overview', icon: LayoutDashboard, source: 'GA4' },
-    { id: 2, name: 'Traffic Sources', icon: Share2, source: 'GA4' },
-    { id: 3, name: 'Pages & Landing Pages', icon: FileText, source: 'GA4' },
-    { id: 4, name: 'Website Events', icon: Zap, source: 'GA4' },
-    { id: 5, name: 'Search Performance', icon: Search, source: 'SC' },
-    { id: 6, name: 'Page Speed', icon: Gauge, source: 'PSI' },
-    { id: 7, name: 'Uptime Monitor', icon: Activity, source: 'Uptime' },
-    { id: 8, name: 'Website Statistics', icon: Database, source: 'BQ' },
-    { id: 9, name: 'Website Updates', icon: RefreshCw, source: 'BQ' },
+    { id: 1, name: 'Report Overview', icon: ClipboardList, source: 'AI' },
+    { id: 2, name: 'Website Analytics', icon: LayoutDashboard, source: 'GA4' },
+    { id: 3, name: 'Traffic Sources', icon: Share2, source: 'GA4' },
+    { id: 4, name: 'Pages & Landing Pages', icon: FileText, source: 'GA4' },
+    { id: 5, name: 'Website Events', icon: Zap, source: 'GA4' },
+    { id: 6, name: 'Search Performance', icon: Search, source: 'SC' },
+    { id: 7, name: 'Page Speed', icon: Gauge, source: 'PSI' },
+    { id: 8, name: 'Uptime Monitor', icon: Activity, source: 'Uptime' },
+    { id: 9, name: 'WP Updates & Stats', icon: RefreshCw, source: 'MainWP' },
   ];
 
   const pages = useMemo(() => {
     if (!client) return [];
-    let enabledPageIds = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+    let enabledPageIds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
     try {
       if (client.enabled_pages) {
         enabledPageIds = JSON.parse(client.enabled_pages);
@@ -456,7 +544,7 @@ export default function ClientDashboard() {
   }, [pages, activePage]);
 
   const MetricCard = ({ title, value, icon: Icon, trend, trendValue, delay = 0 }: any) => (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay }}
@@ -530,13 +618,13 @@ export default function ClientDashboard() {
                 <AreaChart data={gaChartData}>
                   <defs>
                     <linearGradient id="colorUsers" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#e35e3d" stopOpacity={0.1}/>
-                      <stop offset="95%" stopColor="#e35e3d" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#e35e3d" stopOpacity={0.1} />
+                      <stop offset="95%" stopColor="#e35e3d" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
-                  <XAxis 
-                    dataKey="date" 
+                  <XAxis
+                    dataKey="date"
                     tickFormatter={(val) => {
                       try { return format(parseISO(val), 'MMM d'); } catch { return val; }
                     }}
@@ -545,12 +633,12 @@ export default function ClientDashboard() {
                     tick={{ fontSize: 11, fill: '#a1a1aa' }}
                     dy={10}
                   />
-                  <YAxis 
+                  <YAxis
                     axisLine={false}
                     tickLine={false}
                     tick={{ fontSize: 11, fill: '#a1a1aa' }}
                   />
-                  <Tooltip 
+                  <Tooltip
                     contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
                     labelFormatter={(val) => {
                       try { return format(parseISO(val), 'MMM d, yyyy'); } catch { return val; }
@@ -575,9 +663,9 @@ export default function ClientDashboard() {
   const renderTrafficSources = () => {
     if (!client?.hasGA) return <NoDataConfigured source="Google Analytics" />;
     if (gaLoading) return <LoadingState />;
-    
+
     const rows = gaTrafficData?.rows || [];
-    
+
     return (
       <div className="bg-white rounded-3xl border border-gray-200 shadow-none overflow-hidden">
         <div className="p-6 border-b border-gray-200">
@@ -743,8 +831,8 @@ export default function ClientDashboard() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={gscChartData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
-                <XAxis 
-                  dataKey="date" 
+                <XAxis
+                  dataKey="date"
                   tickFormatter={(val) => {
                     try { return format(parseISO(val), 'MMM d'); } catch { return val; }
                   }}
@@ -755,7 +843,7 @@ export default function ClientDashboard() {
                 />
                 <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#a1a1aa' }} />
                 <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#a1a1aa' }} />
-                <Tooltip 
+                <Tooltip
                   contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
                   labelFormatter={(val) => {
                     try { return format(parseISO(val), 'MMM d, yyyy'); } catch { return val; }
@@ -784,17 +872,15 @@ export default function ClientDashboard() {
           <div className="bg-gray-100 p-1 rounded-xl flex">
             <button
               onClick={() => setPsiStrategy('mobile')}
-              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                psiStrategy === 'mobile' ? 'bg-white text-gray-900 shadow-none' : 'text-gray-500 hover:text-gray-600'
-              }`}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${psiStrategy === 'mobile' ? 'bg-white text-gray-900 shadow-none' : 'text-gray-500 hover:text-gray-600'
+                }`}
             >
               Mobile
             </button>
             <button
               onClick={() => setPsiStrategy('desktop')}
-              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                psiStrategy === 'desktop' ? 'bg-white text-gray-900 shadow-none' : 'text-gray-500 hover:text-gray-600'
-              }`}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${psiStrategy === 'desktop' ? 'bg-white text-gray-900 shadow-none' : 'text-gray-500 hover:text-gray-600'
+                }`}
             >
               Desktop
             </button>
@@ -811,21 +897,21 @@ export default function ClientDashboard() {
         <div className="bg-white p-8 rounded-3xl border border-gray-200 shadow-none">
           <h3 className="text-lg font-bold text-gray-900 mb-8">Core Web Vitals</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <VitalsCard 
-              label="Largest Contentful Paint" 
-              value={psiData.lighthouseResult?.audits?.['largest-contentful-paint']?.displayValue} 
+            <VitalsCard
+              label="Largest Contentful Paint"
+              value={psiData.lighthouseResult?.audits?.['largest-contentful-paint']?.displayValue}
               score={psiData.lighthouseResult?.audits?.['largest-contentful-paint']?.score}
               description="Measures loading performance"
             />
-            <VitalsCard 
-              label="Total Blocking Time" 
-              value={psiData.lighthouseResult?.audits?.['total-blocking-time']?.displayValue} 
+            <VitalsCard
+              label="Total Blocking Time"
+              value={psiData.lighthouseResult?.audits?.['total-blocking-time']?.displayValue}
               score={psiData.lighthouseResult?.audits?.['total-blocking-time']?.score}
               description="Measures responsiveness"
             />
-            <VitalsCard 
-              label="Cumulative Layout Shift" 
-              value={psiData.lighthouseResult?.audits?.['cumulative-layout-shift']?.displayValue} 
+            <VitalsCard
+              label="Cumulative Layout Shift"
+              value={psiData.lighthouseResult?.audits?.['cumulative-layout-shift']?.displayValue}
               score={psiData.lighthouseResult?.audits?.['cumulative-layout-shift']?.score}
               description="Measures visual stability"
             />
@@ -835,59 +921,178 @@ export default function ClientDashboard() {
     );
   };
 
-  const renderWebsiteStatistics = () => {
-    if (!client?.hasBQ) return <NoDataConfigured source="BigQuery" />;
-    if (bqLoading) return <LoadingState />;
-    if (bqError) return <ErrorState message={bqError} />;
+  const renderWebsiteStats = () => {
+    if (!client?.hasMainWP) return <NoDataConfigured source="MainWP" />;
+    if (mainwpLoading) return <LoadingState />;
+    if (mainwpError) return <ErrorState message={mainwpError} />;
+    if (!mainwpData) return <LoadingState />;
+
+    const d = mainwpData as any;
+    const upgrades: any[] = d.upgrades || [];
+    const hasUpdates = upgrades.length > 0;
+
+    const typeLabel: Record<string, string> = {
+      core: 'Core',
+      plugin: 'Plugin',
+      theme: 'Theme',
+      translation: 'Translation',
+    };
+
+    const typeBadge: Record<string, string> = {
+      core: 'bg-blue-50 text-blue-700',
+      plugin: 'bg-purple-50 text-purple-700',
+      theme: 'bg-indigo-50 text-indigo-700',
+      translation: 'bg-gray-100 text-gray-600',
+    };
+
+    const stats = [
+      { label: 'WordPress Version', value: d.wpVersion || '—' },
+      { label: 'PHP Version', value: d.phpVersion || '—' },
+      { label: 'MySQL Version', value: d.mysqlVersion || '—' },
+      { label: 'Memory Limit', value: d.memoryLimit || '—' },
+      { label: 'Active Theme', value: d.activeTheme || '—' },
+      { label: 'Server IP', value: d.serverIp || '—' },
+      {
+        label: 'Last Sync',
+        value: d.lastSynced
+          ? new Date(d.lastSynced).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+          : '—',
+        sub: d.lastSynced
+          ? new Date(d.lastSynced).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })
+          : null,
+      },
+    ];
+
+    const carePlan = client?.care_plan?.toLowerCase() || null;
+    const carePlanStyles: Record<string, { bg: string; text: string; border: string; chip: string }> = {
+      pink:  { bg: 'bg-pink-50', text: 'text-pink-800', border: 'border-pink-200', chip: 'bg-pink-400' },
+      white: { bg: 'bg-white',   text: 'text-gray-800', border: 'border-gray-200', chip: 'bg-white border border-gray-300' },
+      black: { bg: 'bg-gray-900', text: 'text-white',   border: 'border-gray-700', chip: 'bg-gray-900' },
+    };
+    const cpStyle = carePlan ? carePlanStyles[carePlan] : null;
 
     return (
-      <div className="bg-white rounded-3xl border border-gray-200 shadow-none overflow-hidden">
-        <div className="p-6 border-b border-gray-200">
-          <h3 className="text-lg font-bold text-gray-900">Custom Statistics</h3>
-          <p className="text-sm text-gray-500">Advanced data from BigQuery</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-sm">
-            <thead>
-              <tr className="bg-gray-50/50 text-gray-500">
-                {bqData.schema?.fields?.map((field: any, i: number) => (
-                  <th key={i} className="p-6 font-semibold uppercase tracking-wider text-[10px] whitespace-nowrap">{field.name}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {bqData.rows?.map((row: any, i: number) => (
-                <tr key={i} className="hover:bg-gray-100 transition-colors">
-                  {row.f.map((cell: any, j: number) => (
-                    <td key={j} className="p-6 text-gray-600 whitespace-nowrap font-mono">{cell.v}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  };
-
-  const renderWebsiteUpdates = () => {
-    if (!client?.hasBQ) return <NoDataConfigured source="BigQuery" />;
-    if (bqLoading) return <LoadingState />;
-    if (bqError) return <ErrorState message={bqError} />;
-
-    return (
-      <div className="bg-white rounded-3xl border border-gray-200 shadow-none overflow-hidden">
-        <div className="p-6 border-b border-gray-200">
-          <h3 className="text-lg font-bold text-gray-900">Website Updates</h3>
-          <p className="text-sm text-gray-500">History of changes tracked in BigQuery</p>
-        </div>
-        <div className="p-20 text-center">
-          <div className="w-20 h-20 bg-gray-50 rounded-3xl flex items-center justify-center mx-auto mb-6">
-            <RefreshCw className="w-10 h-10 text-gray-900" />
+      <div className="space-y-6">
+        {/* Care Plan badge */}
+        {carePlan && cpStyle && (
+          <div className={`rounded-3xl border ${cpStyle.border} ${cpStyle.bg} p-5 flex items-center gap-3`}>
+            <span className={`inline-block w-5 h-5 rounded-full shrink-0 ${cpStyle.chip}`} />
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Care Plan</p>
+              <p className={`text-lg font-bold capitalize ${cpStyle.text}`}>{carePlan}</p>
+            </div>
           </div>
-          <h4 className="text-lg font-semibold text-gray-900 mb-2">Tracking Coming Soon</h4>
-          <p className="text-gray-500 max-w-xs mx-auto">We're currently setting up the automated change tracking for your website.</p>
+        )}
+
+        {/* Stats grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+          {stats.map((s) => (
+            <div key={s.label} className="bg-white rounded-3xl border border-gray-200 p-5">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{s.label}</p>
+              <p className="text-base font-bold text-gray-900 break-all leading-tight">{s.value}</p>
+              {(s as any).sub && (
+                <p className="text-xs text-gray-400 mt-1">{(s as any).sub}</p>
+              )}
+            </div>
+          ))}
         </div>
+
+        {/* Pending upgrades table */}
+        <div className="bg-white rounded-3xl border border-gray-200 overflow-hidden">
+          <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-bold text-gray-900">Pending Updates</h3>
+              <p className="text-sm text-gray-500 mt-0.5">
+                {hasUpdates
+                  ? `${upgrades.length} update${upgrades.length !== 1 ? 's' : ''} available`
+                  : 'Everything is up to date'}
+              </p>
+            </div>
+            {hasUpdates && (
+              <span className="px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-semibold">
+                {upgrades.length} pending
+              </span>
+            )}
+          </div>
+          {hasUpdates ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead>
+                  <tr className="bg-gray-50/60 text-gray-500">
+                    <th className="px-6 py-3 font-semibold uppercase tracking-wider text-[10px]">Type</th>
+                    <th className="px-6 py-3 font-semibold uppercase tracking-wider text-[10px]">Name</th>
+                    <th className="px-6 py-3 font-semibold uppercase tracking-wider text-[10px]">Current</th>
+                    <th className="px-6 py-3 font-semibold uppercase tracking-wider text-[10px]">Available</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {upgrades.map((u: any, i: number) => (
+                    <tr key={i} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${typeBadge[u.type] || 'bg-gray-100 text-gray-600'}`}>
+                          {typeLabel[u.type] || u.type}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 font-medium text-gray-900">{u.name}</td>
+                      <td className="px-6 py-4 font-mono text-xs text-gray-500">{u.currentVersion || '—'}</td>
+                      <td className="px-6 py-4 font-mono text-xs font-semibold text-amber-600">{u.newVersion || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="p-10 text-center">
+              <CheckCircle className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
+              <p className="text-gray-500 text-sm">All plugins, themes and core are up to date.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Completed updates table */}
+        {(() => {
+          const completed: any[] = d.completedUpdates || [];
+          if (completed.length === 0) return null;
+          return (
+            <div className="bg-white rounded-3xl border border-gray-200 overflow-hidden">
+              <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">Recently Updated</h3>
+                  <p className="text-sm text-gray-500 mt-0.5">Changes detected since the last snapshot</p>
+                </div>
+                <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold">
+                  {completed.length} updated
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead>
+                    <tr className="bg-gray-50/60 text-gray-500">
+                      <th className="px-6 py-3 font-semibold uppercase tracking-wider text-[10px]">Type</th>
+                      <th className="px-6 py-3 font-semibold uppercase tracking-wider text-[10px]">Name</th>
+                      <th className="px-6 py-3 font-semibold uppercase tracking-wider text-[10px]">From</th>
+                      <th className="px-6 py-3 font-semibold uppercase tracking-wider text-[10px]">To</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {completed.map((u: any, i: number) => (
+                      <tr key={i} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-6 py-4">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${typeBadge[u.type] || 'bg-gray-100 text-gray-600'}`}>
+                            {typeLabel[u.type] || u.type}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 font-medium text-gray-900">{u.name}</td>
+                        <td className="px-6 py-4 font-mono text-xs text-gray-400">{u.from}</td>
+                        <td className="px-6 py-4 font-mono text-xs font-semibold text-emerald-600">{u.to}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     );
   };
@@ -896,7 +1101,7 @@ export default function ClientDashboard() {
     const value = Math.round((score || 0) * 100);
     const color = value >= 90 ? 'text-gray-900' : value >= 50 ? 'text-amber-500' : 'text-red-500';
     const strokeColor = value >= 90 ? '#e35e3d' : value >= 50 ? '#f59e0b' : '#ef4444';
-    
+
     return (
       <div className="bg-white p-8 rounded-3xl border border-gray-200 shadow-none flex flex-col items-center text-center group hover:shadow-none transition-all">
         <div className="relative w-24 h-24 mb-6">
@@ -931,7 +1136,7 @@ export default function ClientDashboard() {
   const VitalsCard = ({ label, value, score, description }: any) => {
     const color = score >= 0.9 ? 'text-emerald-500' : score >= 0.5 ? 'text-amber-500' : 'text-red-500';
     const bgColor = score >= 0.9 ? 'bg-emerald-500' : score >= 0.5 ? 'bg-amber-500' : 'bg-red-500';
-    
+
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-between">
@@ -939,7 +1144,7 @@ export default function ClientDashboard() {
           <span className={`text-sm font-mono font-bold ${color}`}>{value || 'N/A'}</span>
         </div>
         <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-          <motion.div 
+          <motion.div
             initial={{ width: 0 }}
             animate={{ width: `${(score || 0) * 100}%` }}
             transition={{ duration: 1, ease: "easeOut" }}
@@ -968,7 +1173,7 @@ export default function ClientDashboard() {
       <div>
         <h4 className="font-bold text-lg mb-1">Connection Interrupted</h4>
         <p className="text-sm opacity-80 leading-relaxed">{message}</p>
-        <button 
+        <button
           onClick={() => window.location.reload()}
           className="mt-4 px-4 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold hover:bg-rose-700 transition-colors"
         >
@@ -1034,9 +1239,9 @@ export default function ClientDashboard() {
       {client.global_notification && (() => {
         // WCAG AA-compliant colour map (white text on dark bg, all ≥ 4.5:1 contrast)
         const colorMap: Record<string, string> = {
-          green:  '#15803d', // contrast 4.64:1 ✓
+          green: '#15803d', // contrast 4.64:1 ✓
           yellow: '#b45309', // contrast 4.73:1 ✓
-          red:    '#b91c1c', // contrast 6.14:1 ✓
+          red: '#b91c1c', // contrast 6.14:1 ✓
         };
         const bg = colorMap[client.global_notification_color || 'red'] ?? colorMap.red;
         return (
@@ -1060,9 +1265,9 @@ export default function ClientDashboard() {
             <div className="hidden sm:block">
               <div className="flex items-center gap-3">
                 {client.website_url && (
-                  <img 
-                    src={`https://www.google.com/s2/favicons?domain=${new URL(client.website_url).hostname}&sz=64`} 
-                    alt="" 
+                  <img
+                    src={`https://www.google.com/s2/favicons?domain=${new URL(client.website_url).hostname}&sz=64`}
+                    alt=""
                     className="w-6 h-6 rounded-md"
                     referrerPolicy="no-referrer"
                   />
@@ -1070,10 +1275,10 @@ export default function ClientDashboard() {
                 <h1 className="text-lg font-bold text-gray-900 tracking-tight">{client.name}</h1>
               </div>
               {client.website_url && (
-                <a 
-                  href={client.website_url} 
-                  target="_blank" 
-                  rel="noopener noreferrer" 
+                <a
+                  href={client.website_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="text-[11px] font-medium text-gray-400 hover:text-gray-900 transition-colors flex items-center gap-1.5"
                 >
                   {client.website_url.replace(/^https?:\/\//, '').replace(/\/$/, '')}
@@ -1135,16 +1340,15 @@ export default function ClientDashboard() {
           <div className="flex-1 py-10 px-6 space-y-8 overflow-y-auto">
             <div>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-6 px-4">Navigation</p>
-                  <nav className="space-y-1.5">
+              <nav className="space-y-1.5">
                 {pages.map((page) => (
                   <button
                     key={page.id}
                     onClick={() => setActivePage(page.id)}
-                    className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-sm font-bold transition-all group ${
-                      activePage === page.id
+                    className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-sm font-bold transition-all group ${activePage === page.id
                         ? 'bg-gray-900 text-white shadow-none'
                         : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center gap-4">
                       <page.icon className={`w-5 h-5 transition-colors ${activePage === page.id ? 'text-gray-400' : 'text-gray-400 group-hover:text-gray-900'}`} />
@@ -1174,13 +1378,13 @@ export default function ClientDashboard() {
               </div>
             </div>
           </div>
-          
+
         </aside>
 
         {/* Main Content Area */}
         <main id="dashboard-content" className="flex-1 overflow-y-auto bg-gray-50 p-6 sm:p-10 lg:p-14">
           <div className="max-w-6xl mx-auto">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               className="mb-12"
@@ -1226,17 +1430,144 @@ export default function ClientDashboard() {
   function renderPageContent() {
     switch (activePage) {
       case 0: return renderAiOverview();
-      case 1: return renderAnalyticsOverview();
-      case 2: return renderTrafficSources();
-      case 3: return renderPagesAndLanding();
-      case 4: return renderWebsiteEvents();
-      case 5: return renderSearchPerformance();
-      case 6: return renderPageSpeed();
-      case 7: return renderUptimeMonitor();
-      case 8: return renderWebsiteStatistics();
-      case 9: return renderWebsiteUpdates();
+      case 1: return renderReportOverview();
+      case 2: return renderAnalyticsOverview();
+      case 3: return renderTrafficSources();
+      case 4: return renderPagesAndLanding();
+      case 5: return renderWebsiteEvents();
+      case 6: return renderSearchPerformance();
+      case 7: return renderPageSpeed();
+      case 8: return renderUptimeMonitor();
+      case 9: return renderWebsiteStats();
       default: return renderAiOverview();
     }
+  }
+
+  function renderReportOverview() {
+    if (reportOverviewLoading) {
+      return (
+        <div className="flex flex-col items-center justify-center py-24 gap-4">
+          <Loader2 className="w-8 h-8 text-gray-400 animate-spin" />
+          <p className="text-gray-500 text-sm">Generating your executive summary…</p>
+          <p className="text-gray-400 text-xs">This may take up to 20 seconds</p>
+        </div>
+      );
+    }
+    if (reportOverviewError) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <AlertCircle className="w-8 h-8 text-red-400" />
+          <p className="text-red-500 font-medium">{reportOverviewError}</p>
+          <button
+            onClick={() => { setReportOverviewData(null); setReportOverviewError(''); fetchReportOverview(); }}
+            className="mt-2 px-4 py-2 bg-gray-900 text-white text-sm rounded-xl hover:bg-gray-700 transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
+    if (!reportOverviewData) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <ClipboardList className="w-8 h-8 text-gray-300" />
+          <p className="text-gray-400 text-sm">No report data available</p>
+        </div>
+      );
+    }
+
+    const { summary, keyMetrics, generatedAt, reportStart, reportEnd } = reportOverviewData;
+    const km = keyMetrics || {};
+
+    const statCards = [
+      km.ga && { label: 'Active Users', value: parseInt(km.ga.activeUsers || '0').toLocaleString(), icon: Users, sub: `${km.ga.engagementRate}% engagement` },
+      km.ga && { label: 'Sessions', value: parseInt(km.ga.sessions || '0').toLocaleString(), icon: Activity, sub: `${parseInt(km.ga.newUsers || '0').toLocaleString()} new users` },
+      km.gsc && { label: 'Search Clicks', value: km.gsc.totalClicks.toLocaleString(), icon: MousePointerClick, sub: `${km.gsc.totalImpressions.toLocaleString()} impressions` },
+      km.gsc && { label: 'Avg Position', value: `#${km.gsc.avgPosition}`, icon: Search, sub: `${km.gsc.avgCtr}% avg CTR` },
+      km.psi && { label: 'Performance', value: `${km.psi.performance}/100`, icon: Gauge, sub: `SEO ${km.psi.seo}/100` },
+      km.mainwp && { label: 'WP Updates', value: km.mainwp.pendingUpdates, icon: RefreshCw, sub: `WordPress ${km.mainwp.wpVersion}` },
+    ].filter(Boolean) as { label: string; value: any; icon: any; sub: string }[];
+
+    return (
+      <div className="space-y-8">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Report Overview</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              {reportStart && reportEnd ? `${reportStart} – ${reportEnd}` : 'Last 30 days'}
+            </p>
+          </div>
+          <button
+            onClick={() => { setReportOverviewData(null); setReportOverviewError(''); fetchReportOverview(); }}
+            className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors shrink-0"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Regenerate
+          </button>
+        </div>
+
+        {/* Key Metric Cards */}
+        {statCards.length > 0 && (
+          <div className={`grid gap-4 ${statCards.length <= 2 ? 'grid-cols-2' : statCards.length <= 4 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6'}`}>
+            {statCards.map(({ label, value, icon: Icon, sub }, i) => (
+              <motion.div
+                key={label}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.06 }}
+                className="bg-white rounded-2xl border border-gray-200 p-5"
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <Icon className="w-4 h-4 text-gray-400" />
+                  <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">{label}</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-900 font-mono">{value}</p>
+                <p className="text-xs text-gray-400 mt-1">{sub}</p>
+              </motion.div>
+            ))}
+          </div>
+        )}
+
+        {/* Report Summary */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="bg-white rounded-3xl border border-gray-200 p-8"
+        >
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2 bg-gray-50 rounded-xl">
+              <Sparkles className="w-5 h-5 text-gray-500" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-gray-900">Report Summary</h3>
+            </div>
+          </div>
+          <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed space-y-4">
+            {summary.split('\n\n').filter(Boolean).map((para: string, i: number) => (
+              <p key={i}>{para}</p>
+            ))}
+          </div>
+
+          {/* Sign-off */}
+          <div className="mt-6 pt-6 border-t border-gray-100 text-sm text-gray-600 space-y-1">
+            <p>If you have any questions about your report, please don't hesitate to reach out to the Stoke team at{' '}
+              <a href="mailto:support@stokedesign.co" className="text-gray-900 font-medium hover:underline">support@stokedesign.co</a>{' '}
+              or call us on{' '}
+              <a href="tel:0353127136" className="text-gray-900 font-medium hover:underline">03 5312 7136</a>.
+            </p>
+            <p className="font-medium text-gray-800">— The Stoke Design Team</p>
+          </div>
+
+          {generatedAt && (
+            <p className="text-xs text-gray-300 mt-4 border-t border-gray-100 pt-4">
+              Generated {new Date(generatedAt).toLocaleString('en-AU')}
+            </p>
+          )}
+        </motion.div>
+      </div>
+    );
   }
 
   function renderUptimeMonitor() {
@@ -1248,16 +1579,16 @@ export default function ClientDashboard() {
     const { title, monitors } = uptimeData as { title: string; monitors: any[] };
 
     // Status helpers
-    const statusLabel  = (s: number | null) =>
+    const statusLabel = (s: number | null) =>
       s === 1 ? 'UP' : s === 0 ? 'DOWN' : s === 2 ? 'PENDING' : s === 3 ? 'MAINTENANCE' : 'UNKNOWN';
     const statusColour = (s: number | null) =>
       s === 1 ? 'text-emerald-600 bg-emerald-50 border-emerald-200'
-      : s === 0 ? 'text-red-600 bg-red-50 border-red-200'
-      : s === 2 ? 'text-amber-600 bg-amber-50 border-amber-200'
-      : 'text-blue-600 bg-blue-50 border-blue-200';
-    const dotColour    = (s: number | null) =>
+        : s === 0 ? 'text-red-600 bg-red-50 border-red-200'
+          : s === 2 ? 'text-amber-600 bg-amber-50 border-amber-200'
+            : 'text-blue-600 bg-blue-50 border-blue-200';
+    const dotColour = (s: number | null) =>
       s === 1 ? 'bg-emerald-500' : s === 0 ? 'bg-red-500' : s === 2 ? 'bg-amber-400' : 'bg-blue-400';
-    const beatColour   = (s: number) =>
+    const beatColour = (s: number) =>
       s === 1 ? '#10b981' : s === 0 ? '#ef4444' : s === 2 ? '#f59e0b' : '#60a5fa';
 
     return (
@@ -1308,10 +1639,10 @@ export default function ClientDashboard() {
               {/* Stats row */}
               <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-gray-100">
                 {[
-                  { label: 'Uptime (24 h)',  value: monitor.uptime24h  != null ? `${monitor.uptime24h}%`  : '—', Icon: Activity },
-                  { label: 'Uptime (30 d)',  value: monitor.uptime30d  != null ? `${monitor.uptime30d}%`  : '—', Icon: TrendingUp },
-                  { label: 'Avg Response',   value: monitor.avgPing    != null ? `${monitor.avgPing} ms`  : '—', Icon: Timer },
-                  { label: 'Checks Shown',   value: monitor.heartbeats.length > 0 ? `${monitor.heartbeats.length}` : '—', Icon: Clock },
+                  { label: 'Uptime (24 h)', value: monitor.uptime24h != null ? `${monitor.uptime24h}%` : '—', Icon: Activity },
+                  { label: 'Uptime (30 d)', value: monitor.uptime30d != null ? `${monitor.uptime30d}%` : '—', Icon: TrendingUp },
+                  { label: 'Avg Response', value: monitor.avgPing != null ? `${monitor.avgPing} ms` : '—', Icon: Timer },
+                  { label: 'Checks Shown', value: monitor.heartbeats.length > 0 ? `${monitor.heartbeats.length}` : '—', Icon: Clock },
                 ].map(({ label, value, Icon }) => (
                   <div key={label} className="p-5 text-center">
                     <Icon className="w-4 h-4 text-gray-400 mx-auto mb-1" />
@@ -1354,7 +1685,7 @@ export default function ClientDashboard() {
                     <AreaChart data={chartData} margin={{ top: 4, right: 0, left: -20, bottom: 0 }}>
                       <defs>
                         <linearGradient id={`uptimeGrad-${monitor.id}`} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%"  stopColor="#10b981" stopOpacity={0.25} />
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
                           <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                         </linearGradient>
                       </defs>

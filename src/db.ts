@@ -24,9 +24,6 @@ export interface Client_ {
   name: string;
   slug: string;
   website_url: string | null;
-  contact_first_name: string | null;
-  contact_last_name: string | null;
-  contact_email: string | null;
   enabled_pages: string | null;
   ga_property_id: string | null;
   gsc_site_url: string | null;
@@ -35,6 +32,8 @@ export interface Client_ {
   bq_table_id: string | null;
   psi_url: string | null;
   uptime_kuma_slug: string | null;
+  mainwp_site_id: string | null;
+  care_plan: string | null;
   is_active: number;
   created_at: string;
 }
@@ -60,9 +59,6 @@ function docToClient(doc: Record<string, any>): Client_ {
     name: doc.name,
     slug: doc.slug,
     website_url: doc.website_url ?? null,
-    contact_first_name: doc.contact_first_name ?? null,
-    contact_last_name: doc.contact_last_name ?? null,
-    contact_email: doc.contact_email ?? null,
     enabled_pages: doc.enabled_pages ?? null,
     ga_property_id: doc.ga_property_id ?? null,
     gsc_site_url: doc.gsc_site_url ?? null,
@@ -71,6 +67,8 @@ function docToClient(doc: Record<string, any>): Client_ {
     bq_table_id: doc.bq_table_id ?? null,
     psi_url: doc.psi_url ?? null,
     uptime_kuma_slug: doc.uptime_kuma_slug ?? null,
+    mainwp_site_id: doc.mainwp_site_id ?? null,
+    care_plan: doc.care_plan ?? null,
     // Stored as Boolean in Appwrite; convert to 0/1 for the rest of the app
     is_active: doc.is_active ? 1 : 0,
     created_at: doc.$createdAt,
@@ -118,48 +116,38 @@ export const getClientBySlug = async (slug: string): Promise<Client_ | undefined
   return docToClient(result.documents[0]);
 };
 
+// Core fields written on every create/update — does NOT include care_plan
+// (care_plan is written separately via setClientCarePlan once the Appwrite attribute exists)
+const clientFields = (client: Omit<Client_, 'id' | 'created_at'>) => ({
+  client_id_number: client.client_id_number ?? '',
+  name: client.name,
+  slug: client.slug,
+  website_url: client.website_url ?? '',
+  enabled_pages: client.enabled_pages ?? null,
+  ga_property_id: client.ga_property_id ?? null,
+  gsc_site_url: client.gsc_site_url ?? null,
+  bq_project_id: client.bq_project_id ?? null,
+  bq_dataset_id: client.bq_dataset_id ?? null,
+  bq_table_id: client.bq_table_id ?? null,
+  psi_url: client.psi_url ?? null,
+  uptime_kuma_slug: client.uptime_kuma_slug ?? null,
+  mainwp_site_id: client.mainwp_site_id ?? null,
+  is_active: client.is_active !== 0,
+});
+
 export const createClient = async (client: Omit<Client_, 'id' | 'created_at'>): Promise<Client_> => {
-  const doc = await databases.createDocument(DB_ID, COL_CLIENTS, ID.unique(), {
-    client_id_number: client.client_id_number ?? null,
-    name: client.name,
-    slug: client.slug,
-    website_url: client.website_url ?? null,
-    contact_first_name: client.contact_first_name ?? null,
-    contact_last_name: client.contact_last_name ?? null,
-    contact_email: client.contact_email ?? null,
-    enabled_pages: client.enabled_pages ?? null,
-    ga_property_id: client.ga_property_id ?? null,
-    gsc_site_url: client.gsc_site_url ?? null,
-    bq_project_id: client.bq_project_id ?? null,
-    bq_dataset_id: client.bq_dataset_id ?? null,
-    bq_table_id: client.bq_table_id ?? null,
-    psi_url: client.psi_url ?? null,
-    uptime_kuma_slug: client.uptime_kuma_slug ?? null,
-    is_active: client.is_active !== 0,
-  });
+  const doc = await databases.createDocument(DB_ID, COL_CLIENTS, ID.unique(), clientFields(client));
   return docToClient(doc);
 };
 
 export const updateClient = async (id: string, client: Omit<Client_, 'id' | 'created_at'>): Promise<Client_> => {
-  const doc = await databases.updateDocument(DB_ID, COL_CLIENTS, id, {
-    client_id_number: client.client_id_number ?? null,
-    name: client.name,
-    slug: client.slug,
-    website_url: client.website_url ?? null,
-    contact_first_name: client.contact_first_name ?? null,
-    contact_last_name: client.contact_last_name ?? null,
-    contact_email: client.contact_email ?? null,
-    enabled_pages: client.enabled_pages ?? null,
-    ga_property_id: client.ga_property_id ?? null,
-    gsc_site_url: client.gsc_site_url ?? null,
-    bq_project_id: client.bq_project_id ?? null,
-    bq_dataset_id: client.bq_dataset_id ?? null,
-    bq_table_id: client.bq_table_id ?? null,
-    psi_url: client.psi_url ?? null,
-    uptime_kuma_slug: client.uptime_kuma_slug ?? null,
-    is_active: client.is_active !== 0,
-  });
+  const doc = await databases.updateDocument(DB_ID, COL_CLIENTS, id, clientFields(client));
   return docToClient(doc);
+};
+
+/** Patch only the care_plan field — used by HubSpot sync after the Appwrite attribute is added */
+export const setClientCarePlan = async (id: string, carePlan: string | null): Promise<void> => {
+  await databases.updateDocument(DB_ID, COL_CLIENTS, id, { care_plan: carePlan });
 };
 
 export const deleteClient = async (id: string): Promise<void> => {
