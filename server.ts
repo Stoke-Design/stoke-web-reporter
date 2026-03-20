@@ -1,6 +1,6 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import { getClients, getClientById, getClientBySlug, createClient, updateClient, deleteClient, setClientCarePlan, getSetting, setSetting, getLatestPSISnapshot, savePSISnapshot, saveGAMetrics, saveGSCMetrics, getGAMetrics, getGSCMetrics, getPSISnapshots } from './src/db.js';
+import { getClients, getClientById, getClientBySlug, createClient, updateClient, deleteClient, setClientCarePlan, getSetting, setSetting, getLatestPSISnapshot, savePSISnapshot, saveGAMetrics, saveGSCMetrics, getGAMetrics, getGSCMetrics, getPSISnapshots, getClientReportCache, setClientReportCache } from './src/db.js';
 import { fetchGAData, fetchGSCData, fetchPSIData, slimPSIData, listGASites, listGSCSites } from './src/api/google.js';
 import { getUptimeKumaData, clearUptimeKumaCache } from './src/api/uptimeKuma.js';
 import { getMainWPSiteData } from './src/api/mainwp.js';
@@ -494,6 +494,41 @@ async function startServer() {
       if (endDate === 'today') dbEndDate = format(new Date(), 'yyyy-MM-dd');
       else dbEndDate = String(endDate);
 
+      // Helper: calculate previous period of equal length
+      const calcPrevPeriod = (s: string, e: string) => {
+        const start = new Date(s + 'T00:00:00Z');
+        const end   = new Date(e + 'T00:00:00Z');
+        const days  = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+        return {
+          prevStart: format(subDays(start, days), 'yyyy-MM-dd'),
+          prevEnd:   format(subDays(start, 1),    'yyyy-MM-dd'),
+          days,
+        };
+      };
+
+      // ── Comparison report: current + previous daily active users + total metrics ──
+      if (reportType === 'overview_comparison') {
+        const { prevStart, prevEnd, days } = calcPrevPeriod(dbStartDate, dbEndDate);
+        const totalsMetrics = ['activeUsers', 'newUsers', 'sessions', 'screenPageViews', 'engagementRate', 'userEngagementDuration'];
+        const [curDaily, prevDaily, curTotals, prevTotals] = await Promise.all([
+          fetchGAData(client.ga_property_id, dbStartDate, dbEndDate, ['date'], ['activeUsers']),
+          fetchGAData(client.ga_property_id, prevStart,   prevEnd,   ['date'], ['activeUsers']),
+          fetchGAData(client.ga_property_id, dbStartDate, dbEndDate, [],       totalsMetrics),
+          fetchGAData(client.ga_property_id, prevStart,   prevEnd,   [],       totalsMetrics),
+        ]);
+        return res.json({ curDaily, prevDaily, curTotals, prevTotals, prevStart, prevEnd, days });
+      }
+
+      // ── Countries report: current + previous active users by country ──
+      if (reportType === 'countries') {
+        const { prevStart, prevEnd } = calcPrevPeriod(dbStartDate, dbEndDate);
+        const [current, previous] = await Promise.all([
+          fetchGAData(client.ga_property_id, dbStartDate, dbEndDate, ['country', 'countryId'], ['activeUsers']),
+          fetchGAData(client.ga_property_id, prevStart,   prevEnd,   ['country', 'countryId'], ['activeUsers']),
+        ]);
+        return res.json({ current, previous, prevStart, prevEnd });
+      }
+
       // For overview, we prefer DB if available
       if (reportType === 'overview') {
         const storedMetrics = await getGAMetrics(client.id, dbStartDate, dbEndDate);
@@ -515,7 +550,7 @@ async function startServer() {
       let metrics: string[] = ['activeUsers', 'sessions', 'screenPageViews'];
 
       if (reportType === 'overview_extended') {
-        dimensions = []; // Empty dimensions to get totals for the date range
+        dimensions = [];
         metrics = ['activeUsers', 'newUsers', 'sessions', 'screenPageViews', 'averageSessionDuration', 'engagementRate', 'userEngagementDuration'];
       } else if (reportType === 'traffic_sources') {
         dimensions = ['sessionSource', 'sessionMedium'];
@@ -543,24 +578,42 @@ async function startServer() {
     try {
       const client = await getClientBySlug(req.params.slug);
       if (!client || client.is_active === 0 || !client.gsc_site_url) return res.status(404).json({ error: 'Not configured or inactive' });
-      
-      const { startDate = '30daysAgo', endDate = 'today' } = req.query;
-      
+
+      const { startDate = '30daysAgo', endDate = 'today', reportType = 'date' } = req.query;
+
       let dbStartDate = '';
       let dbEndDate = '';
-      
+
       if (startDate === '30daysAgo') dbStartDate = format(subDays(new Date(), 30), 'yyyy-MM-dd');
       else if (startDate === '90daysAgo') dbStartDate = format(subDays(new Date(), 90), 'yyyy-MM-dd');
       else if (startDate === '365daysAgo') dbStartDate = format(subDays(new Date(), 365), 'yyyy-MM-dd');
       else dbStartDate = String(startDate);
-      
+
       if (endDate === 'today') dbEndDate = format(new Date(), 'yyyy-MM-dd');
       else dbEndDate = String(endDate);
 
+      // Queries breakdown — live from GSC API (top 25 queries)
+      if (reportType === 'queries') {
+        const data = await fetchGSCData(client.gsc_site_url, dbStartDate, dbEndDate, ['query'], 25);
+        return res.json(data);
+      }
+
+      // Device breakdown — live from GSC API
+      if (reportType === 'devices') {
+        const data = await fetchGSCData(client.gsc_site_url, dbStartDate, dbEndDate, ['device']);
+        return res.json(data);
+      }
+
+      // Default: date-based — use Appwrite cache only if it covers ≥70% of the requested range
+      // (GSC has a 2–3 day data delay, so a "full" range will naturally have a few missing tail days)
       const storedMetrics = await getGSCMetrics(client.id, dbStartDate, dbEndDate);
-      
-      if (storedMetrics.length > 0) {
-         // Transform to match Google API response format expected by frontend
+
+      const rangeDays = Math.round(
+        (new Date(dbEndDate).getTime() - new Date(dbStartDate).getTime()) / 86400000
+      ) + 1;
+      const coverageThreshold = Math.floor(rangeDays * 0.7);
+
+      if (storedMetrics.length >= coverageThreshold) {
          const rows = storedMetrics.map(m => ({
            keys: [m.date],
            clicks: m.clicks,
@@ -571,12 +624,7 @@ async function startServer() {
          return res.json({ rows });
       }
 
-      // GSC requires YYYY-MM-DD format
-      // Also, GSC data is usually delayed by 2-3 days. If we ask for 'today', it might fail or return empty.
-      // Let's use the calculated dbStartDate and dbEndDate which are YYYY-MM-DD.
-      // However, if dbEndDate is today, we might want to adjust it to 2 days ago for GSC?
-      // For now, let's just pass the correct format and let the API decide.
-      
+      // Not enough cached data — fetch the full range live from GSC
       const data = await fetchGSCData(client.gsc_site_url, dbStartDate, dbEndDate);
       res.json(data);
     } catch (err: any) {
@@ -928,30 +976,39 @@ async function startServer() {
     }
   });
 
-  // Public: Report Overview — aggregate all available data and generate an executive summary via Anthropic API
+  // Public: Report Overview — aggregate all data, generate AI summary, cache for 24 hours in Appwrite
   app.get('/api/client/:slug/report-overview', async (req, res) => {
     try {
       const client = await getClientBySlug(req.params.slug);
       if (!client || client.is_active === 0) return res.status(404).json({ error: 'Client not found or inactive' });
 
+      // ── Return cached version if less than 24 hours old ──────────────────────
+      const cached = await getClientReportCache(client.id).catch(() => null);
+      if (cached?.generatedAt) {
+        const ageMs = Date.now() - new Date(cached.generatedAt).getTime();
+        if (ageMs < 24 * 60 * 60 * 1000) {
+          console.log(`[Report] Serving cached report for ${client.slug} (age: ${Math.round(ageMs / 60000)}m)`);
+          return res.json({ ...cached, fromCache: true });
+        }
+      }
+
       const anthropicApiKey = await getSetting('anthropic_api_key');
       if (!anthropicApiKey) return res.status(500).json({ error: 'Anthropic API key not configured in Settings' });
 
-      const rangeStart = format(subDays(new Date(), 30), 'yyyy-MM-dd');
-      const rangeEnd   = format(new Date(), 'yyyy-MM-dd');
+      const rangeStart     = format(subDays(new Date(), 30), 'yyyy-MM-dd');
+      const rangeEnd       = format(new Date(), 'yyyy-MM-dd');
+      const prevRangeStart = format(subDays(new Date(), 60), 'yyyy-MM-dd');
+      const prevRangeEnd   = format(subDays(new Date(), 31), 'yyyy-MM-dd');
 
-      // Fetch all available data sources in parallel — failures silently become null
-      const [gaResult, gscResult, psiResult, mainwpResult] = await Promise.allSettled([
-        client.ga_property_id
-          ? fetchGAData(client.ga_property_id, '30daysAgo', 'today', [],
-              ['activeUsers', 'newUsers', 'sessions', 'screenPageViews', 'averageSessionDuration', 'engagementRate'])
-          : Promise.resolve(null),
-        client.gsc_site_url
-          ? getGSCMetrics(client.id, rangeStart, rangeEnd)
-          : Promise.resolve(null),
-        client.psi_url
-          ? getLatestPSISnapshot(client.id, 'mobile')
-          : Promise.resolve(null),
+      const totalsMetrics = ['activeUsers', 'newUsers', 'sessions', 'screenPageViews', 'averageSessionDuration', 'engagementRate'];
+
+      // Fetch current AND previous period data in parallel
+      const [gaResult, gaPrevResult, gscResult, gscPrevResult, psiResult, mainwpResult] = await Promise.allSettled([
+        client.ga_property_id ? fetchGAData(client.ga_property_id, '30daysAgo', 'today',    [], totalsMetrics) : Promise.resolve(null),
+        client.ga_property_id ? fetchGAData(client.ga_property_id, prevRangeStart, prevRangeEnd, [], totalsMetrics) : Promise.resolve(null),
+        client.gsc_site_url   ? getGSCMetrics(client.id, rangeStart, rangeEnd)     : Promise.resolve(null),
+        client.gsc_site_url   ? getGSCMetrics(client.id, prevRangeStart, prevRangeEnd) : Promise.resolve(null),
+        client.psi_url        ? getLatestPSISnapshot(client.id, 'mobile')           : Promise.resolve(null),
         client.mainwp_site_id
           ? (async () => {
               const [mwUrl, mwKey] = await Promise.all([getSetting('mainwp_url'), getSetting('mainwp_api_key')]);
@@ -962,12 +1019,23 @@ async function startServer() {
       ]);
 
       const ga      = gaResult.status      === 'fulfilled' ? gaResult.value      : null;
+      const gaPrev  = gaPrevResult.status  === 'fulfilled' ? gaPrevResult.value  : null;
       const gscRows = gscResult.status     === 'fulfilled' ? gscResult.value     : null;
+      const gscPrevRows = gscPrevResult.status === 'fulfilled' ? gscPrevResult.value : null;
       const psiSnap = psiResult.status     === 'fulfilled' ? psiResult.value     : null;
       const mainwp  = mainwpResult.status  === 'fulfilled' ? mainwpResult.value  : null;
 
-      // GA metrics
+      // Helper: percentage change label
+      const pctChange = (cur: number, prev: number): string => {
+        if (!prev || prev === 0) return '';
+        const pct = ((cur - prev) / prev) * 100;
+        const sign = pct >= 0 ? '+' : '';
+        return ` (${sign}${pct.toFixed(1)}% vs previous period)`;
+      };
+
+      // GA current metrics
       const gaMetrics = (ga as any)?.rows?.[0]?.metricValues || [];
+      const gaPrevM   = (gaPrev as any)?.rows?.[0]?.metricValues || [];
       const gaKey = gaMetrics.length > 0 ? {
         activeUsers:    gaMetrics[0]?.value || '0',
         newUsers:       gaMetrics[1]?.value || '0',
@@ -977,23 +1045,28 @@ async function startServer() {
         engagementRate: ((parseFloat(gaMetrics[5]?.value || '0')) * 100).toFixed(1),
       } : null;
 
-      // GSC metrics
-      const rows = (gscRows as any[]) || [];
+      // GSC current metrics
+      const rows     = (gscRows as any[]) || [];
+      const prevRows = (gscPrevRows as any[]) || [];
       const gscKey = rows.length > 0 ? {
         totalClicks:      rows.reduce((s: number, r: any) => s + (r.clicks || 0), 0),
         totalImpressions: rows.reduce((s: number, r: any) => s + (r.impressions || 0), 0),
         avgPosition:      (rows.reduce((s: number, r: any) => s + (r.position || 0), 0) / rows.length).toFixed(1),
         avgCtr:           ((rows.reduce((s: number, r: any) => s + (r.ctr || 0), 0) / rows.length) * 100).toFixed(2),
       } : null;
+      const gscPrevKey = prevRows.length > 0 ? {
+        totalClicks:      prevRows.reduce((s: number, r: any) => s + (r.clicks || 0), 0),
+        totalImpressions: prevRows.reduce((s: number, r: any) => s + (r.impressions || 0), 0),
+      } : null;
 
       // PSI metrics
       const psiData = psiSnap ? (() => { try { return JSON.parse((psiSnap as any).data); } catch { return null; } })() : null;
       const cats = psiData?.lighthouseResult?.categories || {};
       const psiKey = psiData ? {
-        performance:   Math.round((cats.performance?.score   || 0) * 100),
-        seo:           Math.round((cats.seo?.score           || 0) * 100),
-        accessibility: Math.round((cats.accessibility?.score || 0) * 100),
-        bestPractices: Math.round((cats['best-practices']?.score || 0) * 100),
+        performance:   Math.round((cats.performance?.score          || 0) * 100),
+        seo:           Math.round((cats.seo?.score                  || 0) * 100),
+        accessibility: Math.round((cats.accessibility?.score        || 0) * 100),
+        bestPractices: Math.round((cats['best-practices']?.score    || 0) * 100),
       } : null;
 
       // MainWP metrics
@@ -1005,24 +1078,33 @@ async function startServer() {
 
       const keyMetrics = { ga: gaKey, gsc: gscKey, psi: psiKey, mainwp: mainwpKey };
 
-      // Build prompt sections
+      // Build prompt sections with comparison data
       const sections: string[] = [];
       if (gaKey) {
+        const curActive = parseInt(gaKey.activeUsers);
+        const prevActive = parseInt(gaPrevM[0]?.value || '0');
+        const curSessions = parseInt(gaKey.sessions);
+        const prevSessions = parseInt(gaPrevM[2]?.value || '0');
+        const curNewUsers = parseInt(gaKey.newUsers);
+        const prevNewUsers = parseInt(gaPrevM[1]?.value || '0');
         sections.push(
-          `Website Traffic (last 30 days):\n` +
-          `- Active Users: ${gaKey.activeUsers}\n` +
-          `- New Users: ${gaKey.newUsers}\n` +
-          `- Sessions: ${gaKey.sessions}\n` +
-          `- Page Views: ${gaKey.pageViews}\n` +
-          `- Avg Session Duration: ${gaKey.avgSessionDur}s\n` +
+          `Website Traffic (last 30 days vs previous 30 days):\n` +
+          `- Active Users: ${curActive.toLocaleString()}${pctChange(curActive, prevActive)}\n` +
+          `- New Users: ${curNewUsers.toLocaleString()}${pctChange(curNewUsers, prevNewUsers)}\n` +
+          `- Sessions: ${curSessions.toLocaleString()}${pctChange(curSessions, prevSessions)}\n` +
+          `- Page Views: ${parseInt(gaKey.pageViews).toLocaleString()}\n` +
           `- Engagement Rate: ${gaKey.engagementRate}%`
         );
       }
       if (gscKey) {
+        const curClicks = gscKey.totalClicks;
+        const prevClicks = gscPrevKey?.totalClicks || 0;
+        const curImpressions = gscKey.totalImpressions;
+        const prevImpressions = gscPrevKey?.totalImpressions || 0;
         sections.push(
-          `Search Performance (last 30 days):\n` +
-          `- Total Search Clicks: ${gscKey.totalClicks}\n` +
-          `- Total Impressions: ${gscKey.totalImpressions}\n` +
+          `Search Performance (last 30 days vs previous 30 days):\n` +
+          `- Search Clicks: ${curClicks.toLocaleString()}${pctChange(curClicks, prevClicks)}\n` +
+          `- Impressions: ${curImpressions.toLocaleString()}${pctChange(curImpressions, prevImpressions)}\n` +
           `- Average Position: ${gscKey.avgPosition}\n` +
           `- Average CTR: ${gscKey.avgCtr}%`
         );
@@ -1057,10 +1139,10 @@ async function startServer() {
         `Website: ${client.website_url || 'N/A'}`,
         `Report period: ${reportStart} – ${reportEnd}\n`,
         sections.join('\n\n'),
-        `\nWrite a positive, encouraging summary (3–4 short paragraphs, max 280 words) that:`,
-        `1. Opens with a friendly greeting using the client name and mentions the reporting period (${reportStart} to ${reportEnd}).`,
-        `2. Translates each statistic into plain language that a business owner can understand — focus entirely on what is going well and what the numbers mean for their business.`,
-        `3. Do NOT mention any negatives, areas of concern, or suggestions for improvement. Keep the tone celebratory and upbeat.`,
+        `\nWrite a positive, encouraging summary (3–4 short paragraphs, max 300 words) that:`,
+        `1. Opens with a friendly greeting using the client name and mentions the reporting period.`,
+        `2. Translates each statistic into plain language a business owner can understand. Where comparison figures are provided (e.g. +12.5% vs previous period), naturally weave these into the narrative to show growth or momentum — keep the tone celebratory.`,
+        `3. Do NOT mention any negatives, areas of concern, or suggestions for improvement.`,
         `4. Do NOT include any headers, bullet points, or formatting — write entirely in flowing paragraphs.`,
         `5. Do NOT add a sign-off or closing line — that will be added separately.`,
       ].join('\n');
@@ -1075,7 +1157,7 @@ async function startServer() {
         },
         body: JSON.stringify({
           model: 'claude-opus-4-5',
-          max_tokens: 700,
+          max_tokens: 750,
           messages: [{ role: 'user', content: prompt }],
         }),
       });
@@ -1087,8 +1169,16 @@ async function startServer() {
 
       const anthropicData = await anthropicRes.json();
       const summary = anthropicData.content?.[0]?.text || '';
+      const generatedAt = new Date().toISOString();
 
-      res.json({ summary, keyMetrics, generatedAt: new Date().toISOString(), reportStart, reportEnd });
+      const result = { summary, keyMetrics, generatedAt, reportStart, reportEnd };
+
+      // Persist to Appwrite (fire-and-forget — don't block the response)
+      setClientReportCache(client.id, result).catch(e =>
+        console.warn(`[Report] Failed to cache report for ${client.slug}:`, e.message)
+      );
+
+      res.json(result);
     } catch (err: any) {
       console.error('Report overview error:', err.message);
       res.status(500).json({ error: err.message });

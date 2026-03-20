@@ -174,6 +174,8 @@ export const fetchGSCData = async (
   siteUrl: string,
   startDate: string,
   endDate: string,
+  dimensions: string[] = ["date"],
+  rowLimit: number = 1000,
 ) => {
   const auth = await getAuthClient();
   if (!auth) throw new Error("Google Auth not configured");
@@ -186,7 +188,8 @@ export const fetchGSCData = async (
       requestBody: {
         startDate,
         endDate,
-        dimensions: ["date"],
+        dimensions,
+        rowLimit,
       },
     });
 

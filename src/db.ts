@@ -150,6 +150,32 @@ export const setClientCarePlan = async (id: string, carePlan: string | null): Pr
   await databases.updateDocument(DB_ID, COL_CLIENTS, id, { care_plan: carePlan });
 };
 
+interface ReportCache {
+  summary: string;
+  generatedAt: string;
+  keyMetrics: any;
+  reportStart: string;
+  reportEnd: string;
+}
+
+/** Read the cached report overview from Appwrite (returns null if missing or unparseable) */
+export const getClientReportCache = async (id: string): Promise<ReportCache | null> => {
+  try {
+    const doc = await databases.getDocument(DB_ID, COL_CLIENTS, id);
+    if (!doc.report_cache) return null;
+    return JSON.parse(doc.report_cache) as ReportCache;
+  } catch {
+    return null;
+  }
+};
+
+/** Persist the generated report overview as a JSON blob on the client document */
+export const setClientReportCache = async (id: string, data: ReportCache): Promise<void> => {
+  await databases.updateDocument(DB_ID, COL_CLIENTS, id, {
+    report_cache: JSON.stringify(data),
+  });
+};
+
 export const deleteClient = async (id: string): Promise<void> => {
   await databases.deleteDocument(DB_ID, COL_CLIENTS, id);
 };
