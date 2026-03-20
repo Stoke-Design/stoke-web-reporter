@@ -126,16 +126,57 @@ export default function Settings() {
     }
   };
 
+  const CSV_HEADERS = [
+    'client_id_number', 'name', 'slug', 'website_url', 'enabled_pages',
+    'ga_property_id', 'gsc_site_url', 'psi_url', 'uptime_kuma_slug',
+    'mainwp_site_id', 'care_plan', 'is_active',
+  ];
+
+  const escapeCSV = (val: any) => {
+    const str = val == null ? '' : String(val);
+    return str.includes(',') || str.includes('"') || str.includes('\n')
+      ? `"${str.replace(/"/g, '""')}"`
+      : str;
+  };
+
   const downloadTemplateCSV = () => {
-    const headers = ['name', 'slug', 'website_url', 'enabled_pages', 'ga_property_id', 'gsc_site_url', 'psi_url', 'uptime_kuma_slug', 'mainwp_site_id'];
-    const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n" + "123,Example Client,example-client,https://example.com,John,Doe,john@example.com,\"[1,2,3,4,5,6,7,8,9]\",,,,,,";
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "client_import_template.csv");
+    const exampleRow = [
+      'C001', 'Example Client', 'example-client', 'https://example.com',
+      '[1,2,3,4,5,6,7,8,9]', 'GA-XXXXXXXXX', 'https://example.com/', 'https://example.com',
+      'monitor-slug', 'mainwp-site-id', 'Pink Plan', '1',
+    ].map(escapeCSV).join(',');
+    const csvContent = "data:text/csv;charset=utf-8," + CSV_HEADERS.join(',') + '\n' + exampleRow;
+    const link = document.createElement('a');
+    link.setAttribute('href', encodeURI(csvContent));
+    link.setAttribute('download', 'client_import_template.csv');
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const exportClientsCSV = async () => {
+    try {
+      const res = await fetch('/api/admin/clients');
+      if (!res.ok) throw new Error('Failed to fetch clients');
+      const clients: any[] = await res.json();
+      const rows = [
+        CSV_HEADERS.join(','),
+        ...clients.map(c =>
+          CSV_HEADERS.map(h => escapeCSV(c[h])).join(',')
+        ),
+      ];
+      const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `clients_export_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError('Export failed: ' + err.message);
+    }
   };
 
   const executeImport = async (newClients: any[], clientsToUpdate: any[]) => {
@@ -203,19 +244,32 @@ export default function Settings() {
       
       const clientsToImport = [];
       for (let i = 1; i < rows.length; i++) {
-        if (rows[i].length !== headers.length) continue;
+        if (rows[i].length < 2) continue; // skip blank/malformed rows
         const clientData: any = {
-          name: '', slug: '', website_url: '', enabled_pages: '[1,2,3,4,5,6,7,8,9]', ga_property_id: '', gsc_site_url: '', psi_url: '', uptime_kuma_slug: '', mainwp_site_id: '',
+          client_id_number: '',
+          name: '',
+          slug: '',
+          website_url: '',
+          enabled_pages: '[1,2,3,4,5,6,7,8,9]',
+          ga_property_id: '',
+          gsc_site_url: '',
+          psi_url: '',
+          uptime_kuma_slug: '',
+          mainwp_site_id: '',
+          care_plan: '',
+          is_active: '1',
         };
         headers.forEach((header, index) => {
-          if (clientData.hasOwnProperty(header)) {
-            clientData[header] = rows[i][index].trim();
+          if (Object.prototype.hasOwnProperty.call(clientData, header)) {
+            clientData[header] = (rows[i][index] || '').trim();
           }
         });
-        if (clientData.name && clientData.slug) {
-          if (!clientData.enabled_pages) {
-            clientData.enabled_pages = '[1,2,3,4,5,6,7,8,9]';
+        if (clientData.name) {
+          if (!clientData.slug) {
+            clientData.slug = Math.random().toString(36).slice(2, 10);
           }
+          if (!clientData.enabled_pages) clientData.enabled_pages = '[1,2,3,4,5,6,7,8,9]';
+          if (!clientData.is_active) clientData.is_active = '1';
           clientsToImport.push(clientData);
         }
       }
@@ -711,17 +765,25 @@ export default function Settings() {
                   </div>
                   <div>
                     <h2 className="text-lg font-semibold text-gray-900">Data Management</h2>
-                    <p className="text-sm text-gray-500">Import clients from a CSV file or download the template.</p>
+                    <p className="text-sm text-gray-500">Export all clients, import from CSV, or download the import template.</p>
                   </div>
                 </div>
-                
-                <div className="ml-16 flex gap-3">
+
+                <div className="ml-16 flex gap-3 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={exportClientsCSV}
+                    className="flex items-center px-4 py-2 bg-white text-gray-600 border border-gray-200 rounded-xl font-medium hover:bg-gray-100 transition-colors text-sm"
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Export Clients
+                  </button>
                   <button
                     type="button"
                     onClick={downloadTemplateCSV}
                     className="flex items-center px-4 py-2 bg-white text-gray-600 border border-gray-200 rounded-xl font-medium hover:bg-gray-100 transition-colors text-sm"
                   >
-                    <Download className="w-4 h-4 mr-2" />
+                    <FileJson className="w-4 h-4 mr-2" />
                     Download Template
                   </button>
                   <label className="flex items-center px-4 py-2 bg-white text-gray-600 border border-gray-200 rounded-xl font-medium hover:bg-gray-100 transition-colors cursor-pointer text-sm">

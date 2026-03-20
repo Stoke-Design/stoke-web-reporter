@@ -7,14 +7,13 @@ import {
 import { format, subDays, parseISO, eachDayOfInterval } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import {
-  Loader2, AlertCircle, TrendingUp, Users, Eye, MousePointerClick, Search, Download, ExternalLink,
+  Loader2, AlertCircle, TrendingUp, Users, Eye, MousePointerClick, Search, FileDown, ExternalLink,
   LayoutDashboard, Share2, FileText, Zap, Gauge, Database, RefreshCw,
   Calendar, Globe, ArrowUpRight, ArrowDownRight, Activity, Clock, Layers,
   Info, CheckCircle, AlertTriangle, Megaphone, Bell, Sparkles, Phone, Mail,
   Wifi, WifiOff, Timer, ClipboardList
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { Logo } from '../components/Logo';
 import { GoogleGenAI } from "@google/genai";
@@ -155,6 +154,7 @@ export default function ClientDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [pdfProgress, setPdfProgress] = useState<{ current: number; total: number; label: string } | null>(null);
 
   const [activePage, setActivePage] = useState(0);
   const [gaData, setGaData] = useState<any>(null);
@@ -577,44 +577,385 @@ export default function ClientDashboard() {
   };
 
   const downloadPDF = async () => {
-    const element = document.getElementById('dashboard-content');
-    if (!element) return;
-
     setPdfGenerating(true);
     try {
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#fafafa',
+      // ── Date range ─────────────────────────────────────────────────────────
+      const pdfStart = dateRange === 'custom' ? customStartDate
+        : dateRange === '90daysAgo'  ? formatInTimeZone(subDays(new Date(), 90),  TIMEZONE, 'yyyy-MM-dd')
+        : dateRange === '365daysAgo' ? formatInTimeZone(subDays(new Date(), 365), TIMEZONE, 'yyyy-MM-dd')
+        : formatInTimeZone(subDays(new Date(), 30), TIMEZONE, 'yyyy-MM-dd');
+      const pdfEnd    = dateRange === 'custom' ? customEndDate : formatInTimeZone(new Date(), TIMEZONE, 'yyyy-MM-dd');
+      const dateLabel = `${format(parseISO(pdfStart), 'd MMM yyyy')} – ${format(parseISO(pdfEnd), 'd MMM yyyy')}`;
+      const activeIds = pages.map(p => p.id);
+      const needsGA   = !!client?.hasGA;
+      const needsGSC  = !!client?.hasGSC  && activeIds.includes(6);
+      const needsPSI  = !!client?.hasPSI  && activeIds.includes(7);
+
+      // ── Fetch all data in parallel ──────────────────────────────────────────
+      setPdfProgress({ current: 0, total: 3, label: 'Fetching data…' });
+      const q = (url: string) => fetch(url).then(r => r.ok ? r.json() : null).catch(() => null);
+      const gaBase = `/api/client/${slug}/ga?startDate=${pdfStart}&endDate=${pdfEnd}`;
+      const gscBase = `/api/client/${slug}/gsc?startDate=${pdfStart}&endDate=${pdfEnd}`;
+      const [gaComp, gaCtry, gaTraf, gaPagesRaw, gaLandingRaw, gaEv, gscDly, gscQ, gscDev, psiRes] = await Promise.all([
+        needsGA ? q(`${gaBase}&reportType=overview_comparison`) : null,
+        needsGA && activeIds.includes(2) ? q(`${gaBase}&reportType=countries`) : null,
+        needsGA && activeIds.includes(3) ? q(`${gaBase}&reportType=traffic_sources`) : null,
+        needsGA && activeIds.includes(4) ? q(`${gaBase}&reportType=pages`) : null,
+        needsGA && activeIds.includes(4) ? q(`${gaBase}&reportType=landing_pages`) : null,
+        needsGA && activeIds.includes(5) ? q(`${gaBase}&reportType=events`) : null,
+        needsGSC ? q(gscBase) : null,
+        needsGSC ? q(`${gscBase}&reportType=queries`) : null,
+        needsGSC ? q(`${gscBase}&reportType=devices`) : null,
+        needsPSI ? q(`/api/client/${slug}/psi?strategy=desktop`) : null,
+      ]);
+      // Combine pages + landing_pages into the shape the PDF builder expects
+      const gaPages2 = gaPagesRaw || gaLandingRaw
+        ? { pages: gaPagesRaw, landing_pages: gaLandingRaw }
+        : null;
+
+      // ── Render logo SVG → white PNG for cover ──────────────────────────────
+      // Hardcoded SVG string (from Logo.tsx) with explicit fill="#ffffff" so
+      // currentColor is never evaluated in a standalone blob context (which resolves to black).
+      const logoSvgString = `<svg id="Layer_2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 437.2602 71.8225" width="874" height="144"><g fill="#ffffff"><path d="M83.3579,59.6966c-3.2861,0-6.2686-.6484-8.9482-1.9453-2.6816-1.2969-4.8428-3.1445-6.4854-5.5439-1.6426-2.3994-2.5723-5.2197-2.7881-8.4619h7.457c.1299,1.7295.6816,3.2969,1.6543,4.7012.9727,1.4053,2.2578,2.5186,3.8574,3.3389,1.5996.8223,3.3496,1.2324,5.2529,1.2324,2.8096,0,5.0674-.6162,6.7764-1.8477,1.707-1.2324,2.5615-2.8428,2.5615-4.8311,0-1.8164-.584-3.2529-1.751-4.3125-1.168-1.0586-2.6377-1.8477-4.4102-2.3672l-8.04-2.334c-2.0752-.6045-3.9883-1.4043-5.7393-2.3994-1.751-.9941-3.1563-2.334-4.2148-4.0205-1.0596-1.6855-1.5889-3.8467-1.5889-6.4844,0-2.4639.6816-4.6357,2.043-6.5166,1.3613-1.8809,3.252-3.3496,5.6738-4.4092,2.4209-1.0586,5.1875-1.5889,8.2998-1.5889,3.1992,0,6.0195.5508,8.4629,1.6533,2.4414,1.1025,4.3984,2.6592,5.8682,4.6689,1.4688,2.0098,2.3125,4.3994,2.5293,7.165h-7.457c-.3037-1.9453-1.2764-3.5762-2.9189-4.8955-1.6426-1.3184-3.8037-1.9775-6.4844-1.9775-2.5937,0-4.626.5186-6.0947,1.5557-1.4707,1.0381-2.2051,2.4648-2.2051,4.2803,0,1.5996.5293,2.8525,1.5889,3.7607,1.0586.9082,2.4531,1.5996,4.1826,2.0752l8.1699,2.334c2.1611.6064,4.1387,1.417,5.9336,2.4316,1.793,1.0166,3.2197,2.4111,4.2793,4.1826,1.0596,1.7734,1.5889,4.1074,1.5889,7.0029,0,2.7236-.7031,5.1016-2.1074,7.1338-1.4053,2.0322-3.3828,3.6094-5.9326,4.7334-2.5518,1.124-5.5557,1.6855-9.0137,1.6855Z"/><path d="M119.6532,59.6966c-3.2861,0-5.9658-.875-8.041-2.626-2.0752-1.751-3.1123-4.4414-3.1123-8.0732v-17.5078h-5.9658v-5.9658h5.9658v-10.0508h7.0674v10.0508h8.1709v5.9658h-8.1709v16.9238c0,1.6865.4434,2.9619,1.3301,3.8262.8848.8652,2.042,1.2969,3.4687,1.2969.6484,0,1.2646-.0537,1.8477-.1621.584-.1074,1.0918-.2266,1.5244-.3564v6.1602c-.4766.1299-1.0703.248-1.7832.3564-.7139.1074-1.4814.1621-2.3018.1621Z"/><path d="M143.2009,59.6966c-3.2861,0-6.2041-.7451-8.7539-2.2373-2.5518-1.4912-4.5508-3.5547-5.999-6.1924-1.4482-2.6357-2.1719-5.6191-2.1719-8.9482s.7236-6.2998,2.1719-8.916c1.4482-2.6152,3.4473-4.6689,5.999-6.1602,2.5498-1.4922,5.4678-2.2373,8.7539-2.2373,3.2422,0,6.1377.7451,8.6885,2.2373,2.5508,1.4912,4.5605,3.5332,6.0312,6.1279,1.4688,2.5938,2.2041,5.5762,2.2041,8.9482s-.7354,6.3662-2.2041,8.9805c-1.4707,2.6162-3.4805,4.6689-6.0312,6.1602-2.5508,1.4922-5.4463,2.2373-8.6885,2.2373ZM143.2009,53.5364c1.9014,0,3.5762-.4746,5.0254-1.4268,1.4473-.9502,2.582-2.2793,3.4043-3.9873.8203-1.708,1.2314-3.6416,1.2314-5.8037,0-2.2051-.4111-4.1387-1.2314-5.8037-.8223-1.6641-1.957-2.9717-3.4043-3.9229-1.4492-.9502-3.124-1.4268-5.0254-1.4268-2.9404,0-5.2959,1.0488-7.0684,3.1445-1.7734,2.0977-2.6592,4.7666-2.6592,8.0088,0,3.2852.8857,5.9766,2.6592,8.0732,1.7725,2.0967,4.1279,3.1445,7.0684,3.1445Z"/><path d="M164.372,59.178V11.9065h7.0674v26.4561l13.4883-12.8389h9.8564l-13.9424,13.0986,14.9795,20.5557h-8.8194l-11.0879-15.8223-4.4746,4.1504v11.6719h-7.0674Z"/><path d="M201.8525,44.0042c.3018,3.0703,1.3301,5.4473,3.0801,7.1328,1.751,1.6865,3.9883,2.5293,6.7119,2.5293,2.0752,0,3.8682-.4639,5.3818-1.3945,1.5127-.9287,2.4639-2.2578,2.8535-3.9873h6.9385c-.5625,3.6748-2.2598,6.4951-5.0908,8.4619-2.832,1.9678-6.2578,2.9502-10.2773,2.9502-3.5459,0-6.5498-.8105-9.0137-2.4316-2.4639-1.6211-4.3447-3.7607-5.6416-6.4189-1.2969-2.6592-1.9453-5.501-1.9453-8.5273s.6162-5.8574,1.8477-8.4951c1.2324-2.6357,3.0586-4.7656,5.4795-6.3867s5.4033-2.4316,8.9492-2.4316c3.501,0,6.4297.7676,8.7861,2.3018,2.3555,1.5352,4.1387,3.5244,5.3496,5.9658,1.21,2.4424,1.793,5.0693,1.751,7.8789,0,.6484-.0439,1.5996-.1299,2.8525h-25.0303ZM211.1259,30.5813c-2.3779,0-4.335.6924-5.8691,2.0752-1.5342,1.3838-2.5605,3.3076-3.0801,5.7715h17.249c-.1738-2.291-.9629-4.1719-2.3672-5.6416-1.4053-1.4688-3.3828-2.2051-5.9326-2.2051Z"/><path d="M233.1084,59.178V12.4251h14.5898c3.2422,0,6.29.498,9.1426,1.4912,2.8535.9951,5.3828,2.4648,7.5869,4.4102,2.2051,1.9453,3.9229,4.377,5.1553,7.2949,1.2324,2.918,1.8477,6.3008,1.8477,10.1475,0,3.8486-.6152,7.2305-1.8477,10.1484-1.2324,2.918-2.9502,5.3613-5.1553,7.3271-2.2041,1.9678-4.7334,3.4482-7.5869,4.4424-2.8525.9951-5.9004,1.4912-9.1426,1.4912h-14.5898ZM247.2441,52.4993c2.8096,0,5.4678-.5518,7.9756-1.6533,2.5068-1.1025,4.5498-2.8857,6.1279-5.3506,1.5781-2.4639,2.3672-5.7061,2.3672-9.7266s-.7891-7.251-2.3672-9.6943c-1.5781-2.4414-3.6211-4.2148-6.1279-5.3164-2.5078-1.1025-5.166-1.6543-7.9756-1.6543h-6.6143v33.3955h6.6143Z"/><path d="M282.583,44.0042c.3018,3.0703,1.3301,5.4473,3.0801,7.1328,1.751,1.6865,3.9883,2.5293,6.7119,2.5293,2.0752,0,3.8682-.4639,5.3818-1.3945,1.5127-.9287,2.4639-2.2578,2.8535-3.9873h6.9385c-.5625,3.6748-2.2598,6.4951-5.0908,8.4619-2.832,1.9678-6.2578,2.9502-10.2773,2.9502-3.5459,0-6.5498-.8105-9.0137-2.4316-2.4639-1.6211-4.3447-3.7607-5.6416-6.4189-1.2969-2.6592-1.9453-5.501-1.9453-8.5273s.6162-5.8574,1.8477-8.4951c1.2324-2.6357,3.0586-4.7656,5.4795-6.3867s5.4033-2.4316,8.9492-2.4316c3.501,0,6.4297.7676,8.7861,2.3018,2.3555,1.5352,4.1387,3.5244,5.3496,5.9658,1.21,2.4424,1.793,5.0693,1.751,7.8789,0,.6484-.0439,1.5996-.1299,2.8525h-25.0303ZM291.8564,30.5813c-2.3779,0-4.335.6924-5.8691,2.0752-1.5342,1.3838-2.5605,3.3076-3.0801,5.7715h17.249c-.1738-2.291-.9629-4.1719-2.3672-5.6416-1.4053-1.4688-3.3828-2.2051-5.9326-2.2051Z"/><path d="M325.6406,59.6966c-2.8105,0-5.2754-.5088-7.3926-1.5234-2.1182-1.0156-3.7832-2.4316-4.9932-4.2471-1.2109-1.8164-1.8799-3.8691-2.0098-6.1611h6.9385c.0859,1.4707.7988,2.8115,2.1396,4.0205,1.3398,1.2109,3.1123,1.8164,5.3174,1.8164,1.8584,0,3.3604-.3896,4.5068-1.168,1.1445-.7773,1.7178-1.75,1.7178-2.918,0-1.123-.3789-1.9873-1.1348-2.5938-.7568-.6045-1.7617-1.0586-3.0146-1.3613l-5.5771-1.2969c-1.6436-.3896-3.1777-.9404-4.6035-1.6533-1.4268-.7139-2.584-1.7285-3.4697-3.0479-.8867-1.3184-1.3291-3.0156-1.3291-5.0908,0-1.7715.5078-3.3711,1.5234-4.7979,1.0156-1.4268,2.4424-2.5615,4.2803-3.4043,1.8369-.8438,3.9883-1.2646,6.4521-1.2646,3.5879,0,6.6143.9297,9.0781,2.7881,2.4639,1.8594,3.9121,4.4092,4.3447,7.6514h-6.9385c-.1738-1.5127-.8975-2.668-2.1729-3.4688-1.2754-.7998-2.7129-1.2002-4.3115-1.2002-1.5137,0-2.7559.3359-3.7285,1.0059-.9727.6709-1.459,1.5674-1.459,2.6904,0,.9082.3564,1.6543,1.0693,2.2373.7139.584,1.6748,1.0273,2.8857,1.3291l5.5771,1.2324c1.8154.3887,3.458.9404,4.9277,1.6533,1.4687.7139,2.6367,1.7295,3.502,3.0479.8643,1.3193,1.2969,3.1025,1.2969,5.3496,0,1.9453-.5518,3.6963-1.6543,5.2529-1.1016,1.5557-2.6582,2.7988-4.668,3.7285-2.0107.9287-4.377,1.3936-7.1006,1.3936Z"/><path d="M344.1666,20.2063v-7.9756h7.9111v7.9756h-7.9111ZM344.5563,59.178V25.5237h7.0674v33.6543h-7.0674Z"/><path d="M374.0413,71.8225c-4.583,0-8.29-1.0049-11.1211-3.0146-2.832-2.0107-4.4854-4.9189-4.9609-8.7217h7.1328c.2598,1.8574,1.1563,3.3164,2.6914,4.377,1.5342,1.0586,3.6201,1.5879,6.2578,1.5879,2.8096,0,4.9922-.7236,6.5488-2.1719,1.5566-1.4492,2.334-3.4912,2.334-6.1279v-4.4092c-.8213,1.2109-2.1182,2.2158-3.8906,3.0156-1.7725.7998-3.7832,1.1992-6.0303,1.1992-3.2852,0-6.1064-.6914-8.4619-2.0752-2.3564-1.3828-4.1729-3.2959-5.4473-5.7383-1.2754-2.4424-1.9131-5.2412-1.9131-8.3975,0-3.1992.627-6.0303,1.8809-8.4951,1.2529-2.4639,3.0576-4.3867,5.4141-5.7705,2.3564-1.3838,5.1338-2.0752,8.333-2.0752,2.1611,0,4.1504.4209,5.9658,1.2646,1.8154.8428,3.1982,1.9561,4.1494,3.3389v-4.085h7.0684v31.5146c0,4.625-1.416,8.2451-4.2471,10.8613-2.832,2.6152-6.7334,3.9229-11.7041,3.9229ZM373.9114,51.4612c2.8955,0,5.1973-.9287,6.9053-2.7881,1.708-1.8584,2.5615-4.3008,2.5615-7.3271,0-3.0693-.8535-5.5332-2.5615-7.3926-1.708-1.8584-4.0098-2.7881-6.9053-2.7881s-5.1992.9297-6.9062,2.7881c-1.708,1.8594-2.5615,4.3232-2.5615,7.3926,0,3.0264.8535,5.4688,2.5615,7.3271,1.707,1.8594,4.0098,2.7881,6.9062,2.7881Z"/><path d="M395.0956,59.178V25.5237h7.0674v5.7061c1.168-1.9014,2.7236-3.4141,4.6689-4.5391,1.9453-1.123,4.1064-1.6855,6.4844-1.6855s4.4746.4971,6.29,1.4912c1.8154.9951,3.2422,2.3896,4.2803,4.1826,1.0371,1.7939,1.5557,3.9014,1.5557,6.3223v22.1768h-7.0684v-20.6201c0-2.1182-.6152-3.8477-1.8477-5.1875-1.2324-1.3398-2.9287-2.0107-5.0898-2.0107-2.8975,0-5.167,1.1572-6.8086,3.4697-1.6436,2.3125-2.4648,5.501-2.4648,9.5645v14.7842h-7.0674Z"/><path d="M427.2454,23.7244v-4.9411h-1.803v-1.0678h4.8411v1.0678h-1.803v4.9411h-1.235ZM430.8841,23.7244v-6.0089h1.4023l1.803,4.2563,1.8021-4.2563h1.3686v6.0089h-1.1351v-3.706l-1.5854,3.706h-.9183l-1.5686-3.706v3.706h-1.1687Z"/><polygon points="26.6592 48.8889 26.6592 39.9888 39.9888 28.9012 39.9888 13.3296 26.6592 0 26.6592 13.3296 0 35.5455 0 48.8751 26.6592 71.0911 53.3183 48.8751 53.3183 26.6729 26.6592 48.8889"/></g></svg>`;
+      const logoImgData = await new Promise<string | null>((resolve) => {
+        const blob = new Blob([logoSvgString], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 874; canvas.height = 144;
+          canvas.getContext('2d')!.drawImage(img, 0, 0);
+          URL.revokeObjectURL(url);
+          resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+        img.src = url;
       });
 
-      const imgData = canvas.toDataURL('image/png');
+      setPdfProgress({ current: 1, total: 3, label: 'Building PDF…' });
+      await new Promise(r => setTimeout(r, 30));
+
+      // ── PDF constants & helpers ─────────────────────────────────────────────
       const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const W = 210, H = 297, ML = 15, MR = 15, MT = 15, MB = 16;
+      const CW = W - ML - MR;
+      let y = MT;
 
-      const imgProps = pdf.getImageProperties(imgData);
-      const pdfImgHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      const scoreRGB = (s: number | null): [number,number,number] => {
+        if (s === null || s === undefined) return [156,163,175];
+        return s >= 0.9 ? [16,185,129] : s >= 0.5 ? [245,158,11] : [239,68,68];
+      };
 
-      let heightLeft = pdfImgHeight;
-      let position = 0;
-      let pageHeight = pdfHeight;
+      const checkBreak = (need: number) => {
+        if (y + need > H - MB) {
+          pdf.addPage();
+          pdf.setFillColor(227, 94, 61); pdf.rect(0, 0, W, 1.5, 'F');
+          y = MT + 4;
+        }
+      };
 
-      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfImgHeight);
-      heightLeft -= pageHeight;
-
-      while (heightLeft >= 0) {
-        position = heightLeft - pdfImgHeight;
+      const pageHeader = (title: string) => {
         pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfImgHeight);
-        heightLeft -= pageHeight;
+        pdf.setFillColor(227, 94, 61); pdf.rect(0, 0, W, 1.5, 'F');
+        y = MT;
+        pdf.setFont('helvetica', 'bold'); pdf.setFontSize(18); pdf.setTextColor(10,10,10);
+        pdf.text(title, ML, y + 10);
+        pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(107,114,128);
+        pdf.text(`${client?.name}  •  ${dateLabel}`, W - MR, y + 6, { align: 'right' });
+        y += 20;
+        pdf.setDrawColor(229,231,235); pdf.setLineWidth(0.3);
+        pdf.line(ML, y, W - MR, y);
+        y += 8;
+      };
+
+      const secTitle = (title: string) => {
+        checkBreak(14); y += 2;
+        pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10); pdf.setTextColor(10,10,10);
+        pdf.text(title, ML, y); y += 5;
+        pdf.setDrawColor(243,244,246); pdf.setLineWidth(0.2);
+        pdf.line(ML, y, W - MR, y); y += 5;
+      };
+
+      const metricRow = (items: { label: string; value: string; sub?: string }[]) => {
+        const colW = CW / items.length;
+        checkBreak(26);
+        pdf.setFillColor(249,250,251); pdf.rect(ML, y - 2, CW, 24, 'F');
+        pdf.setDrawColor(229,231,235); pdf.setLineWidth(0.2); pdf.rect(ML, y - 2, CW, 24, 'S');
+        items.forEach((m, i) => {
+          const x = ML + i * colW + 5;
+          pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.setTextColor(107,114,128);
+          pdf.text(m.label, x, y + 5);
+          pdf.setFont('helvetica', 'bold'); pdf.setFontSize(15); pdf.setTextColor(10,10,10);
+          pdf.text(m.value, x, y + 15);
+          if (m.sub) { pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.setTextColor(107,114,128); pdf.text(m.sub, x, y + 20); }
+          if (i < items.length - 1) { pdf.setDrawColor(229,231,235); pdf.setLineWidth(0.2); pdf.line(ML + (i+1)*colW, y, ML + (i+1)*colW, y + 22); }
+        });
+        y += 28;
+      };
+
+      const drawTable = (cols: { label: string; w: number; align?: 'left'|'right' }[], rows: (string|null)[][]) => {
+        const MAX = 10, RH = 7, HH = 8;
+        const shown = rows.slice(0, MAX);
+        checkBreak(HH + RH * shown.length + 8);
+        // Header
+        pdf.setFillColor(249,250,251); pdf.rect(ML, y - 5, CW, HH, 'F');
+        pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); pdf.setTextColor(107,114,128);
+        let x = ML + 3;
+        cols.forEach(c => {
+          const a = c.align ?? (x === ML + 3 ? 'left' : 'right');
+          if (a === 'right') pdf.text(c.label.toUpperCase(), x + c.w - 3, y, { align: 'right' });
+          else pdf.text(c.label.toUpperCase(), x, y);
+          x += c.w;
+        });
+        y += HH;
+        // Rows
+        pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9);
+        shown.forEach((row, ri) => {
+          checkBreak(RH + 2);
+          if (ri % 2 === 1) { pdf.setFillColor(252,252,253); pdf.rect(ML, y - RH + 1.5, CW, RH, 'F'); }
+          x = ML + 3;
+          cols.forEach((c, ci) => {
+            let txt = row[ci] ?? '—';
+            if (ci === 0 && txt.length > 45) txt = txt.slice(0, 42) + '…';
+            const a = c.align ?? (ci === 0 ? 'left' : 'right');
+            pdf.setTextColor(ci === 0 ? 17 : 75, ci === 0 ? 24 : 85, ci === 0 ? 39 : 99);
+            if (a === 'right') pdf.text(txt, x + c.w - 3, y, { align: 'right' });
+            else pdf.text(txt, x, y);
+            x += c.w;
+          });
+          y += RH;
+          pdf.setDrawColor(243,244,246); pdf.setLineWidth(0.15);
+          pdf.line(ML, y - 1.5, W - MR, y - 1.5);
+        });
+        if (rows.length > MAX) {
+          pdf.setFont('helvetica', 'italic'); pdf.setFontSize(7); pdf.setTextColor(156,163,175);
+          pdf.text(`Showing top ${MAX} of ${rows.length}`, ML, y + 3); y += 6;
+        }
+        y += 5;
+      };
+
+      // ── COVER PAGE ─────────────────────────────────────────────────────────
+      pdf.setFillColor(10,10,10); pdf.rect(0, 0, W, H, 'F');
+      // Logo (SVG rendered to PNG) — aspect ratio 437.26 / 71.82 ≈ 6.09
+      if (logoImgData) {
+        pdf.addImage(logoImgData, 'PNG', ML, 16, 55, 55 / 6.09);
+      } else {
+        pdf.setFont('helvetica', 'bold'); pdf.setFontSize(13); pdf.setTextColor(255,255,255);
+        pdf.text('STOKE DESIGN', ML, 24);
+      }
+      // Client name
+      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(32); pdf.setTextColor(255,255,255);
+      const nameLines = pdf.splitTextToSize(client?.name || '', CW);
+      pdf.text(nameLines, ML, 118);
+      const nameLH = nameLines.length * 11;
+      // URL
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(12); pdf.setTextColor(156,163,175);
+      pdf.text(client?.website_url || '', ML, 118 + nameLH + 6);
+      // Divider
+      pdf.setDrawColor(55,65,81); pdf.setLineWidth(0.4);
+      pdf.line(ML, 118 + nameLH + 14, W - MR, 118 + nameLH + 14);
+      const divY = 118 + nameLH + 22;
+      // Labels
+      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8); pdf.setTextColor(107,114,128);
+      pdf.text('WEBSITE PERFORMANCE REPORT', ML, divY);
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); pdf.setTextColor(156,163,175);
+      pdf.text(dateLabel, ML, divY + 9);
+      pdf.text(`Generated ${formatInTimeZone(new Date(), TIMEZONE, 'd MMMM yyyy')}`, ML, divY + 17);
+      // Confidential
+      pdf.setFontSize(8); pdf.setTextColor(75,85,99);
+      pdf.text(`Confidential — prepared for ${client?.name}`, ML, 280);
+      // Orange bottom bar
+      pdf.setFillColor(227,94,61); pdf.rect(0, H - 4, W, 4, 'F');
+
+      // Helper: render multi-paragraph text, respecting \n breaks
+      const renderText = (text: string, fontSize = 9) => {
+        pdf.setFont('helvetica', 'normal'); pdf.setFontSize(fontSize); pdf.setTextColor(55,65,81);
+        const clean = text.replace(/[#*_`]/g, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        clean.split('\n').forEach((para) => {
+          if (para.trim() === '') { checkBreak(4); y += 3; return; }
+          const lines = pdf.splitTextToSize(para.trim(), CW);
+          lines.forEach((line: string) => { checkBreak(fontSize * 0.8); pdf.text(line, ML, y); y += fontSize * 0.65; });
+        });
+        y += 4;
+      };
+
+      // ── PAGE: AI Insights ───────────────────────────────────────────────────
+      if (activeIds.includes(0) && aiSummary) {
+        pageHeader('AI Insights Overview');
+        renderText(aiSummary);
       }
 
-      pdf.save(`${client?.name || 'client'}-report-${formatInTimeZone(new Date(), TIMEZONE, 'yyyy-MM-dd')}.pdf`);
+      // ── PAGE: Report Overview ───────────────────────────────────────────────
+      if (activeIds.includes(1) && reportOverviewData) {
+        pageHeader('Report Overview');
+        const rod = reportOverviewData;
+        if (rod.summary) {
+          renderText(rod.summary);
+          y += 2;
+        }
+      }
+
+      // ── PAGE: Website Analytics ─────────────────────────────────────────────
+      if (activeIds.includes(2) && gaComp?.curTotals?.rows?.[0]) {
+        pageHeader('Website Analytics');
+        const compPct = (i: number) => {
+          if (!gaComp?.curTotals || !gaComp?.prevTotals) return '';
+          const c = parseFloat(gaComp.curTotals.rows?.[0]?.metricValues?.[i]?.value||'0');
+          const p = parseFloat(gaComp.prevTotals.rows?.[0]?.metricValues?.[i]?.value||'0');
+          if (p === 0) return ''; const v = ((c-p)/p)*100; return `${v>=0?'+':''}${v.toFixed(1)}% vs prev`;
+        };
+        const mv0 = gaComp.curTotals.rows[0].metricValues;
+        const totUsers = parseInt(mv0[0]?.value||'0');
+        const totSess  = parseInt(mv0[2]?.value||'0');
+        const totViews = parseInt(mv0[3]?.value||'0');
+        metricRow([
+          { label: 'Active Users', value: totUsers.toLocaleString(), sub: compPct(0) },
+          { label: 'Sessions',     value: totSess.toLocaleString(),  sub: compPct(2) },
+          { label: 'Page Views',   value: totViews.toLocaleString(), sub: compPct(3) },
+        ]);
+        const engRate = ((parseFloat(mv0[4]?.value||'0'))*100).toFixed(1);
+        const engSecs = parseFloat(mv0[5]?.value||'0');
+        const engTime = engSecs < 60 ? `${Math.round(engSecs)}s` : `${Math.floor(engSecs/60)}m ${Math.round(engSecs%60)}s`;
+        metricRow([
+          { label: 'New Users',          value: parseInt(mv0[1]?.value||'0').toLocaleString(), sub: compPct(1) },
+          { label: 'Engagement Rate',    value: `${engRate}%`,  sub: compPct(4) },
+          { label: 'Avg Engagement Time',value: engTime,         sub: compPct(5) },
+        ]);
+        if (gaCtry?.current?.rows?.length > 0) {
+          secTitle('Top Countries');
+          drawTable(
+            [{ label: 'Country', w: 130 }, { label: 'Users', w: 50, align: 'right' }],
+            gaCtry.current.rows.map((r: any) => [r.dimensionValues[0].value, parseInt(r.metricValues[0].value).toLocaleString()])
+          );
+        }
+      }
+
+      // ── PAGE: Traffic Sources ───────────────────────────────────────────────
+      if (activeIds.includes(3) && gaTraf?.rows?.length > 0) {
+        pageHeader('Traffic Sources');
+        drawTable(
+          [{ label: 'Source', w: 52 }, { label: 'Medium', w: 44 }, { label: 'Users', w: 28, align: 'right' }, { label: 'Sessions', w: 28, align: 'right' }, { label: 'Eng Rate', w: 28, align: 'right' }],
+          gaTraf.rows.map((r: any) => [r.dimensionValues[0].value, r.dimensionValues[1].value, parseInt(r.metricValues[0].value).toLocaleString(), parseInt(r.metricValues[1].value).toLocaleString(), `${(parseFloat(r.metricValues[2].value)*100).toFixed(1)}%`])
+        );
+      }
+
+      // ── PAGE: Pages & Landing Pages ─────────────────────────────────────────
+      if (activeIds.includes(4) && gaPages2) {
+        pageHeader('Pages & Landing Pages');
+        const pRows = (gaPages2.pages?.rows || []).map((r: any) => {
+          const v = parseInt(r.metricValues[0].value)||0, u = parseInt(r.metricValues[1].value)||0, es = parseFloat(r.metricValues[2].value)||0;
+          const vu = u > 0 ? (v/u).toFixed(1) : '—';
+          const sp = u > 0 ? es/u : 0;
+          const et = sp < 60 ? `${Math.round(sp)}s` : `${Math.floor(sp/60)}m ${Math.round(sp%60)}s`;
+          return [r.dimensionValues[0].value, v.toLocaleString(), u.toLocaleString(), vu, u > 0 ? et : '—'];
+        });
+        if (pRows.length > 0) {
+          secTitle('Top Content');
+          drawTable([{ label: 'Page', w: 74 }, { label: 'Views', w: 26, align: 'right' }, { label: 'Users', w: 26, align: 'right' }, { label: 'Views/User', w: 28, align: 'right' }, { label: 'Eng/User', w: 26, align: 'right' }], pRows);
+        }
+        const lRows = (gaPages2.landing_pages?.rows || []).map((r: any) => [r.dimensionValues[0].value, parseInt(r.metricValues[0].value).toLocaleString(), parseInt(r.metricValues[4].value).toLocaleString()]);
+        if (lRows.length > 0) {
+          secTitle('Landing Pages');
+          drawTable([{ label: 'Landing Page', w: 136 }, { label: 'Sessions', w: 24, align: 'right' }, { label: 'Conversions', w: 20, align: 'right' }], lRows);
+        }
+      }
+
+      // ── PAGE: Website Events ────────────────────────────────────────────────
+      if (activeIds.includes(5) && gaEv?.rows?.length > 0) {
+        pageHeader('Website Events');
+        drawTable(
+          [{ label: 'Event Name', w: 90 }, { label: 'Count', w: 30, align: 'right' }, { label: 'Users', w: 30, align: 'right' }, { label: 'Events/User', w: 30, align: 'right' }],
+          gaEv.rows.map((r: any) => { const c = parseInt(r.metricValues[0].value)||0, u = parseInt(r.metricValues[1].value)||0; return [r.dimensionValues[0].value, c.toLocaleString(), u.toLocaleString(), u > 0 ? (c/u).toFixed(1) : '—']; })
+        );
+      }
+
+      // ── PAGE: Search Performance ────────────────────────────────────────────
+      if (activeIds.includes(6) && gscDly) {
+        pageHeader('Search Performance');
+        const gr = gscDly.rows || [];
+        const totClk = gr.reduce((s: number, r: any) => s + r.clicks, 0);
+        const totImp = gr.reduce((s: number, r: any) => s + r.impressions, 0);
+        const avgCTR = gr.length > 0 ? (gr.reduce((s: number, r: any) => s + r.ctr, 0) / gr.length * 100).toFixed(1) : '0';
+        const avgPos = gr.length > 0 ? (gr.reduce((s: number, r: any) => s + r.position, 0) / gr.length).toFixed(1) : '0';
+        metricRow([{ label: 'Total Clicks', value: totClk.toLocaleString() }, { label: 'Impressions', value: totImp.toLocaleString() }, { label: 'Avg. CTR', value: `${avgCTR}%` }, { label: 'Avg. Position', value: avgPos }]);
+        if (gscQ?.rows?.length > 0) {
+          secTitle('Top Queries');
+          drawTable(
+            [{ label: 'Query', w: 86 }, { label: 'Clicks', w: 22, align: 'right' }, { label: 'Impressions', w: 30, align: 'right' }, { label: 'CTR', w: 22, align: 'right' }, { label: 'Position', w: 20, align: 'right' }],
+            gscQ.rows.map((r: any) => [r.keys[0], r.clicks.toLocaleString(), r.impressions.toLocaleString(), `${(r.ctr*100).toFixed(1)}%`, r.position.toFixed(1)])
+          );
+        }
+        if (gscDev?.rows?.length > 0) {
+          secTitle('Devices');
+          drawTable(
+            [{ label: 'Device', w: 90 }, { label: 'Clicks', w: 30, align: 'right' }, { label: 'Impressions', w: 36, align: 'right' }, { label: 'CTR', w: 24, align: 'right' }],
+            gscDev.rows.map((r: any) => [r.keys[0].charAt(0).toUpperCase() + r.keys[0].slice(1).toLowerCase(), r.clicks.toLocaleString(), r.impressions.toLocaleString(), `${(r.ctr*100).toFixed(1)}%`])
+          );
+        }
+      }
+
+      // ── PAGE: Page Speed ────────────────────────────────────────────────────
+      if (activeIds.includes(7) && psiRes?.lighthouseResult) {
+        pageHeader('Page Speed');
+        const lr = psiRes.lighthouseResult;
+        secTitle('Scores — Desktop');
+        checkBreak(36);
+        const scores = [
+          { label: 'Performance',   score: lr.categories?.performance?.score },
+          { label: 'Accessibility', score: lr.categories?.accessibility?.score },
+          { label: 'Best Practices',score: lr.categories?.['best-practices']?.score },
+          { label: 'SEO',           score: lr.categories?.seo?.score },
+        ];
+        const bw = CW / 4;
+        scores.forEach((s, i) => {
+          const x = ML + i * bw;
+          const pct = s.score !== null && s.score !== undefined ? Math.round(s.score * 100) : null;
+          const col = scoreRGB(s.score);
+          pdf.setFillColor(249,250,251); pdf.rect(x, y - 3, bw - 2, 30, 'F');
+          pdf.setFont('helvetica', 'bold'); pdf.setFontSize(26); pdf.setTextColor(col[0],col[1],col[2]);
+          pdf.text(pct !== null ? String(pct) : '—', x + bw/2 - 1, y + 16, { align: 'center' });
+          pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(107,114,128);
+          pdf.text(s.label, x + bw/2 - 1, y + 23, { align: 'center' });
+          pdf.setFillColor(col[0],col[1],col[2]); pdf.rect(x, y + 26, bw - 2, 2, 'F');
+        });
+        y += 36;
+        secTitle('Core Web Vitals');
+        [
+          { label: 'Largest Contentful Paint', key: 'largest-contentful-paint', desc: 'Loading performance' },
+          { label: 'Total Blocking Time',       key: 'total-blocking-time',       desc: 'Responsiveness' },
+          { label: 'Cumulative Layout Shift',   key: 'cumulative-layout-shift',   desc: 'Visual stability' },
+        ].forEach(v => {
+          const a = lr.audits?.[v.key]; if (!a) return;
+          checkBreak(15);
+          const col = scoreRGB(a.score);
+          pdf.setFillColor(249,250,251); pdf.rect(ML, y - 3, CW, 12, 'F');
+          pdf.setFillColor(col[0],col[1],col[2]); pdf.rect(ML, y - 3, 3, 12, 'F');
+          pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.setTextColor(17,24,39); pdf.text(v.label, ML + 7, y + 3);
+          pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.setTextColor(107,114,128); pdf.text(v.desc, ML + 7, y + 8);
+          pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10); pdf.setTextColor(col[0],col[1],col[2]); pdf.text(a.displayValue||'—', W - MR, y + 3, { align: 'right' });
+          y += 14;
+        });
+      }
+
+      // ── Footer on every content page ────────────────────────────────────────
+      const totalPages = pdf.getNumberOfPages();
+      for (let i = 2; i <= totalPages; i++) {
+        pdf.setPage(i);
+        pdf.setDrawColor(229,231,235); pdf.setLineWidth(0.2); pdf.line(ML, H - 10, W - MR, H - 10);
+        pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.setTextColor(156,163,175);
+        pdf.text(`${client?.name} — ${dateLabel}`, ML, H - 6);
+        pdf.text(`Page ${i - 1} of ${totalPages - 1}`, W - MR, H - 6, { align: 'right' });
+      }
+
+      setPdfProgress({ current: 2, total: 3, label: 'Saving…' });
+      await new Promise(r => setTimeout(r, 30));
+      pdf.save(`${client?.name || 'client'}-report-${pdfEnd}.pdf`);
     } catch (err) {
-      console.error('PDF generation failed:', err);
+      console.error('PDF failed:', err);
+      setPdfProgress({ current: 0, total: 1, label: `Error: ${(err as Error).message || 'Unknown error'}` });
+      await new Promise(r => setTimeout(r, 3000));
     } finally {
+      setPdfProgress(null);
       setPdfGenerating(false);
     }
   };
@@ -1931,7 +2272,7 @@ export default function ClientDashboard() {
               disabled={pdfGenerating}
               className="flex items-center gap-2.5 px-5 py-2.5 bg-gray-900 text-white rounded-xl font-medium hover:bg-gray-800 disabled:opacity-50 transition-all shadow-none active:scale-95"
             >
-              {pdfGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              {pdfGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
               <span>Export Report</span>
             </button>
           </div>
@@ -1986,7 +2327,7 @@ export default function ClientDashboard() {
         </aside>
 
         {/* Main Content Area */}
-        <main id="dashboard-content" className="flex-1 overflow-y-auto bg-gray-50 p-6 sm:p-10 lg:p-14">
+        <main id="pdf-main-content" className="flex-1 overflow-y-auto bg-gray-50 p-6 sm:p-10 lg:p-14">
           <div className="max-w-6xl mx-auto">
             <motion.div
               initial={{ opacity: 0, x: -20 }}
@@ -2022,12 +2363,45 @@ export default function ClientDashboard() {
             </AnimatePresence>
 
             {/* Disclaimer */}
-            <p className="mt-10 text-[10px] text-gray-400 leading-relaxed border-t border-gray-100 pt-6 max-w-xl">
-              Data presented in this report is sourced from Google Search Console, Google Analytics 4, MainWP, PageSpeed Insights, and Uptime Monitor. Figures may vary between platforms due to differences in data collection methods and attribution. All data is provided for indicative purposes only.
-            </p>
+            <div className="mt-10 border-t border-gray-100 pt-6 space-y-2 max-w-xl">
+              <p className="text-[10px] text-gray-400 leading-relaxed">
+                Data presented in this report is sourced from Google Search Console, Google Analytics 4, MainWP, PageSpeed Insights, and Uptime Monitor. Figures may vary between platforms due to differences in data collection methods and attribution. All data is provided for indicative purposes only.
+              </p>
+              <p className="text-[10px] text-gray-400">
+                © {new Date().getFullYear()} Stoke Design Co Pty Ltd T/A Stoke Design™. All Rights Reserved.
+              </p>
+            </div>
           </div>
         </main>
       </div>
+
+
+{/* ── PDF Generation Progress Modal ── */}
+      {pdfProgress && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999]">
+          <div className="bg-white rounded-2xl p-8 w-80 shadow-2xl">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">
+              {pdfProgress.label.startsWith('Error:') ? 'Export Failed' : 'Generating PDF'}
+            </h3>
+            <p className={`text-sm mb-5 ${pdfProgress.label.startsWith('Error:') ? 'text-red-500' : 'text-gray-500'}`}>
+              {pdfProgress.label}
+            </p>
+            {!pdfProgress.label.startsWith('Error:') && (
+              <>
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gray-900 rounded-full transition-all duration-500"
+                    style={{ width: `${(pdfProgress.current / pdfProgress.total) * 100}%` }}
+                  />
+                </div>
+                <p className="text-xs text-gray-400 mt-2 text-right">
+                  {pdfProgress.current} of {pdfProgress.total}
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 
