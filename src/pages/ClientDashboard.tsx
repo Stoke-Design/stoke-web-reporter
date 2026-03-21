@@ -563,11 +563,11 @@ export default function ClientDashboard() {
                 </div>
                 <span className="font-bold">03 5312 7136</span>
               </a>
-              <a href="mailto:support@stokedesign.co" className="flex items-center gap-3 text-gray-400 hover:text-white transition-colors">
+              <a href="mailto:web@stokedesign.co" className="flex items-center gap-3 text-gray-400 hover:text-white transition-colors">
                 <div className="p-2 bg-white/10 rounded-lg">
                   <Mail className="w-5 h-5" />
                 </div>
-                <span className="font-bold">support@stokedesign.co</span>
+                <span className="font-bold">web@stokedesign.co</span>
               </a>
             </div>
           </div>
@@ -2535,7 +2535,7 @@ export default function ClientDashboard() {
           {/* Sign-off */}
           <div className="mt-6 pt-6 border-t border-gray-100 text-sm text-gray-600 space-y-1">
             <p>If you have any questions about your report, please don't hesitate to reach out to the Stoke team at{' '}
-              <a href="mailto:support@stokedesign.co" className="text-gray-900 font-medium hover:underline">support@stokedesign.co</a>{' '}
+              <a href="mailto:web@stokedesign.co" className="text-gray-900 font-medium hover:underline">web@stokedesign.co</a>{' '}
               or call us on{' '}
               <a href="tel:0353127136" className="text-gray-900 font-medium hover:underline">03 5312 7136</a>.
             </p>

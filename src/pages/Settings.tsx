@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Key, FileJson, AlertCircle, Database, Download, Upload, Plus, Users, Tag, Bot, Activity, Share2, Server } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Key, FileJson, AlertCircle, Database, Download, Upload, Plus, Users, Tag, Bot, Activity, Share2, Server, Mail } from 'lucide-react';
 
 const PAGE_TITLE = 'Stoke Design Website Reporter';
 
@@ -31,11 +31,16 @@ export default function Settings() {
     webhook_url: '',
     webhook_secret: '',
     webhook_inbound_token: '',
-    webhook_events_enabled: '["client.created","client.updated","psi.completed","uptime.alert","report.viewed"]',
+    webhook_events_enabled: '["client.created","client.updated","psi.completed","uptime.alert","report.viewed","report.emailed"]',
     hubspot_access_token: '',
     hubspot_client_secret: '',
     mainwp_url: '',
     mainwp_api_key: '',
+    postmark_server_token: '',
+    smtp_from_email: '',
+    smtp_from_name: '',
+    smtp_reply_to: '',
+    report_send_hour: '9',
   });
 
   useEffect(() => {
@@ -51,6 +56,30 @@ export default function Settings() {
   const [savingUser, setSavingUser] = useState(false);
   const [userError, setUserError] = useState('');
   const [userSuccess, setUserSuccess] = useState('');
+
+  const [testEmailTo, setTestEmailTo] = useState('');
+  const [sendingTestEmail, setSendingTestEmail] = useState(false);
+  const [testEmailResult, setTestEmailResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  const handleSendTestEmail = async () => {
+    if (!testEmailTo) return;
+    setSendingTestEmail(true);
+    setTestEmailResult(null);
+    try {
+      const res = await fetch('/api/admin/test-smtp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: testEmailTo }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      setTestEmailResult({ ok: true, msg: `Test email sent to ${data.sentTo}` });
+    } catch (err: any) {
+      setTestEmailResult({ ok: false, msg: err.message });
+    } finally {
+      setSendingTestEmail(false);
+    }
+  };
 
   useEffect(() => {
     fetchSettings();
@@ -76,11 +105,16 @@ export default function Settings() {
         webhook_url: data.webhook_url || '',
         webhook_secret: data.webhook_secret || '',
         webhook_inbound_token: data.webhook_inbound_token || '',
-        webhook_events_enabled: data.webhook_events_enabled || '["client.created","client.updated","psi.completed","uptime.alert","report.viewed"]',
+        webhook_events_enabled: data.webhook_events_enabled || '["client.created","client.updated","psi.completed","uptime.alert","report.viewed","report.emailed"]',
         hubspot_access_token: data.hubspot_access_token || '',
         hubspot_client_secret: data.hubspot_client_secret || '',
         mainwp_url: data.mainwp_url || '',
         mainwp_api_key: data.mainwp_api_key || '',
+        postmark_server_token: data.postmark_server_token || '',
+        smtp_from_email: data.smtp_from_email || '',
+        smtp_from_name: data.smtp_from_name || '',
+        smtp_reply_to: data.smtp_reply_to || '',
+        report_send_hour: data.report_send_hour || '9',
       });
     } catch (err: any) {
       setError(err.message);
@@ -126,11 +160,27 @@ export default function Settings() {
     }
   };
 
-  const CSV_HEADERS = [
+  // CSV column keys (internal) — used for export and import mapping
+  const CSV_KEYS = [
     'client_id_number', 'name', 'slug', 'website_url', 'enabled_pages',
     'ga_property_id', 'gsc_site_url', 'psi_url', 'uptime_kuma_slug',
-    'mainwp_site_id', 'care_plan', 'is_active',
+    'mainwp_site_id', 'care_plan', 'contact_email', 'first_name', 'last_name',
+    'next_send_date', 'hubspot_record_id', 'email_notifications', 'is_active',
   ];
+
+  // Display headers for template/export — mark required fields
+  const CSV_HEADERS = [
+    'client_id_number', 'name (required)', 'slug', 'website_url', 'enabled_pages',
+    'ga_property_id', 'gsc_site_url', 'psi_url', 'uptime_kuma_slug',
+    'mainwp_site_id', 'care_plan', 'contact_email', 'first_name', 'last_name',
+    'next_send_date', 'hubspot_record_id', 'email_notifications', 'is_active',
+  ];
+
+  // Map display header → key for import parsing
+  const headerToKey = (header: string): string => {
+    const clean = header.replace(/\s*\(required\)\s*/gi, '').trim();
+    return clean;
+  };
 
   const escapeCSV = (val: any) => {
     const str = val == null ? '' : String(val);
@@ -143,7 +193,9 @@ export default function Settings() {
     const exampleRow = [
       'C001', 'Example Client', 'example-client', 'https://example.com',
       '[1,2,3,4,5,6,7,8,9]', 'GA-XXXXXXXXX', 'https://example.com/', 'https://example.com',
-      'monitor-slug', 'mainwp-site-id', 'Pink Plan', '1',
+      'monitor-slug', 'mainwp-site-id', 'Pink Plan',
+      'client@example.com', 'Jane', 'Smith',
+      '', '', '1', '1',
     ].map(escapeCSV).join(',');
     const csvContent = "data:text/csv;charset=utf-8," + CSV_HEADERS.join(',') + '\n' + exampleRow;
     const link = document.createElement('a');
@@ -162,7 +214,7 @@ export default function Settings() {
       const rows = [
         CSV_HEADERS.join(','),
         ...clients.map(c =>
-          CSV_HEADERS.map(h => escapeCSV(c[h])).join(',')
+          CSV_KEYS.map(k => escapeCSV(c[k])).join(',')
         ),
       ];
       const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -240,8 +292,8 @@ export default function Settings() {
       };
 
       const rows = text.split('\n').filter(row => row.trim() !== '').map(parseCSVRow);
-      const headers = rows[0].map(h => h.trim());
-      
+      const headers = rows[0].map(h => headerToKey(h));
+
       const clientsToImport = [];
       for (let i = 1; i < rows.length; i++) {
         if (rows[i].length < 2) continue; // skip blank/malformed rows
@@ -257,6 +309,12 @@ export default function Settings() {
           uptime_kuma_slug: '',
           mainwp_site_id: '',
           care_plan: '',
+          contact_email: '',
+          first_name: '',
+          last_name: '',
+          next_send_date: '',
+          hubspot_record_id: '',
+          email_notifications: '1',
           is_active: '1',
         };
         headers.forEach((header, index) => {
@@ -646,7 +704,7 @@ export default function Settings() {
                   <div>
                     <label className="block text-sm font-medium text-gray-600 mb-2">Enabled Outbound Events</label>
                     <div className="grid grid-cols-2 gap-2">
-                      {(['client.created', 'client.updated', 'psi.completed', 'uptime.alert', 'report.viewed'] as const).map(evt => {
+                      {(['client.created', 'client.updated', 'psi.completed', 'uptime.alert', 'report.viewed', 'report.emailed'] as const).map(evt => {
                         let enabled: string[] = [];
                         try { enabled = JSON.parse(formData.webhook_events_enabled); } catch {}
                         const checked = enabled.includes(evt);
@@ -752,6 +810,110 @@ export default function Settings() {
                   <p className="text-xs text-gray-500">
                     Generate your API key under <strong>MainWP → Settings → REST API</strong>. Set the <strong>MainWP Site ID</strong> per client in Admin to activate the Website Statistics and Updates pages.
                   </p>
+                </div>
+              </section>
+
+              <div className="border-t border-gray-200"></div>
+
+              {/* Email Notifications Section */}
+              <section>
+                <div className="flex items-start gap-4 mb-4">
+                  <div className="p-3 bg-sky-900/20 text-sky-400 rounded-xl">
+                    <Mail className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Email Notifications (Postmark)</h2>
+                    <p className="text-sm text-gray-500">Send monthly performance report emails to clients via Postmark SMTP.</p>
+                  </div>
+                </div>
+                <div className="ml-16 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">Postmark Server Token</label>
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      value={formData.postmark_server_token}
+                      onChange={(e) => setFormData({ ...formData, postmark_server_token: e.target.value })}
+                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-2">From Email Address</label>
+                      <input
+                        type="text"
+                        value={formData.smtp_from_email}
+                        onChange={(e) => setFormData({ ...formData, smtp_from_email: e.target.value })}
+                        placeholder="reports@yourdomain.com"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-2">From Name</label>
+                      <input
+                        type="text"
+                        value={formData.smtp_from_name}
+                        onChange={(e) => setFormData({ ...formData, smtp_from_name: e.target.value })}
+                        placeholder="Stoke Design"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">Reply-To Address <span className="text-gray-400 font-normal">(optional)</span></label>
+                    <input
+                      type="text"
+                      value={formData.smtp_reply_to}
+                      onChange={(e) => setFormData({ ...formData, smtp_reply_to: e.target.value })}
+                      placeholder="hello@yourdomain.com"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">When clients reply to report emails, replies will go to this address instead of the From address.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">Daily Send Time</label>
+                    <select
+                      value={formData.report_send_hour ?? '9'}
+                      onChange={(e) => setFormData({ ...formData, report_send_hour: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none bg-white"
+                    >
+                      {Array.from({ length: 24 }, (_, i) => {
+                        const label = i === 0 ? '12:00 AM' : i < 12 ? `${i}:00 AM` : i === 12 ? '12:00 PM' : `${i - 12}:00 PM`;
+                        return <option key={i} value={String(i)}>{label}</option>;
+                      })}
+                    </select>
+                    <p className="mt-1 text-xs text-gray-500">Automated monthly reports are dispatched at this hour each day (server local time). Default: 9:00 AM.</p>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Find your Server Token in Postmark → Servers → your server → API Tokens. The email address must be a verified sender in Postmark. Monthly emails are sent automatically on each client's configured send date.
+                  </p>
+                  <div className="pt-2">
+                    <label className="block text-sm font-medium text-gray-600 mb-2">Send Test Email</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="email"
+                        value={testEmailTo}
+                        onChange={(e) => { setTestEmailTo(e.target.value); setTestEmailResult(null); }}
+                        placeholder="you@example.com"
+                        className="flex-1 px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSendTestEmail}
+                        disabled={sendingTestEmail || !testEmailTo}
+                        className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition-colors disabled:opacity-50"
+                      >
+                        {sendingTestEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                        Send Test
+                      </button>
+                    </div>
+                    {testEmailResult && (
+                      <p className={`mt-2 text-xs ${testEmailResult.ok ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {testEmailResult.ok ? '✓ ' : '✗ '}{testEmailResult.msg}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </section>
 

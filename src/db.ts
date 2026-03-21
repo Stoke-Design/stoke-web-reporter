@@ -16,6 +16,8 @@ const COL_SETTINGS = process.env.APPWRITE_COLLECTION_SETTINGS!;
 const COL_PSI      = process.env.APPWRITE_COLLECTION_PSI_SNAPSHOTS!;
 const COL_GA       = process.env.APPWRITE_COLLECTION_GA_METRICS!;
 const COL_GSC      = process.env.APPWRITE_COLLECTION_GSC_METRICS!;
+const COL_EMAIL_LOGS    = process.env.APPWRITE_COLLECTION_EMAIL_LOGS!;
+const COL_ACTIVITY_LOGS = process.env.APPWRITE_COLLECTION_ACTIVITY_LOGS!;
 
 // ── Interfaces ───────────────────────────────────────────────────────────────
 export interface Client_ {
@@ -34,6 +36,12 @@ export interface Client_ {
   uptime_kuma_slug: string | null;
   mainwp_site_id: string | null;
   care_plan: string | null;
+  contact_email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  next_send_date: string | null;
+  hubspot_record_id: string | null;
+  email_notifications: number; // 0 | 1
   is_active: number;
   created_at: string;
 }
@@ -69,6 +77,12 @@ function docToClient(doc: Record<string, any>): Client_ {
     uptime_kuma_slug: doc.uptime_kuma_slug ?? null,
     mainwp_site_id: doc.mainwp_site_id ?? null,
     care_plan: doc.care_plan ?? null,
+    contact_email: doc.contact_email ?? null,
+    first_name: doc.first_name ?? null,
+    last_name: doc.last_name ?? null,
+    next_send_date: doc.next_send_date ?? null,
+    hubspot_record_id: doc.hubspot_record_id ?? null,
+    email_notifications: doc.email_notifications !== false ? 1 : 0,
     // Stored as Boolean in Appwrite; convert to 0/1 for the rest of the app
     is_active: doc.is_active ? 1 : 0,
     created_at: doc.$createdAt,
@@ -132,6 +146,8 @@ const clientFields = (client: Omit<Client_, 'id' | 'created_at'>) => ({
   psi_url: client.psi_url ?? null,
   uptime_kuma_slug: client.uptime_kuma_slug ?? null,
   mainwp_site_id: client.mainwp_site_id ?? null,
+  // contact_email, first_name, last_name, next_send_date, email_notifications
+  // are patched separately via setClientEmailFields (same pattern as care_plan)
   is_active: client.is_active !== 0,
 });
 
@@ -148,6 +164,21 @@ export const updateClient = async (id: string, client: Omit<Client_, 'id' | 'cre
 /** Patch only the care_plan field — used by HubSpot sync after the Appwrite attribute is added */
 export const setClientCarePlan = async (id: string, carePlan: string | null): Promise<void> => {
   await databases.updateDocument(DB_ID, COL_CLIENTS, id, { care_plan: carePlan });
+};
+
+/** Patch email-related fields — used by HubSpot sync and admin edits */
+export const setClientEmailFields = async (
+  id: string,
+  fields: {
+    contact_email?: string | null;
+    first_name?: string | null;
+    last_name?: string | null;
+    next_send_date?: string | null;
+    hubspot_record_id?: string | null;
+    email_notifications?: boolean;
+  }
+): Promise<void> => {
+  await databases.updateDocument(DB_ID, COL_CLIENTS, id, fields);
 };
 
 interface ReportCache {
@@ -174,6 +205,16 @@ export const setClientReportCache = async (id: string, data: ReportCache): Promi
   await databases.updateDocument(DB_ID, COL_CLIENTS, id, {
     report_cache: JSON.stringify(data),
   });
+};
+
+/**
+ * Invalidate the cached report so the next request regenerates it.
+ * Stamps generatedAt to epoch — the 24h cache check will see it as stale.
+ */
+export const clearClientReportCache = async (id: string): Promise<void> => {
+  const existing = await getClientReportCache(id);
+  if (!existing) return; // nothing cached, nothing to clear
+  await setClientReportCache(id, { ...existing, generatedAt: '1970-01-01T00:00:00.000Z' });
 };
 
 export const deleteClient = async (id: string): Promise<void> => {
@@ -336,4 +377,102 @@ export const getGSCMetrics = async (clientId: string, startDate: string, endDate
     position: doc.position,
     created_at: doc.$createdAt,
   }));
+};
+
+// ── Email Logs ────────────────────────────────────────────────────────────────
+
+export interface EmailLog {
+  id: string;
+  client_id: string;
+  client_name: string;
+  website_url: string | null;
+  recipient_email: string;
+  subject: string;
+  status: 'sent' | 'failed';
+  error: string | null;
+  created_at: string;
+}
+
+function docToEmailLog(doc: Record<string, any>): EmailLog {
+  return {
+    id: doc.$id,
+    client_id: doc.client_id,
+    client_name: doc.client_name,
+    website_url: doc.website_url ?? null,
+    recipient_email: doc.recipient_email,
+    subject: doc.subject,
+    status: doc.status,
+    error: doc.error ?? null,
+    created_at: doc.$createdAt,
+  };
+}
+
+export const saveEmailLog = async (log: Omit<EmailLog, 'id' | 'created_at'>): Promise<void> => {
+  await databases.createDocument(DB_ID, COL_EMAIL_LOGS, ID.unique(), log);
+};
+
+export const getEmailLogs = async (limit = 100): Promise<EmailLog[]> => {
+  const result = await databases.listDocuments(DB_ID, COL_EMAIL_LOGS, [
+    Query.orderDesc('$createdAt'),
+    Query.limit(limit),
+  ]);
+  return result.documents.map(docToEmailLog);
+};
+
+export const getEmailLogsByClient = async (clientId: string, limit = 50): Promise<EmailLog[]> => {
+  const result = await databases.listDocuments(DB_ID, COL_EMAIL_LOGS, [
+    Query.equal('client_id', clientId),
+    Query.orderDesc('$createdAt'),
+    Query.limit(limit),
+  ]);
+  return result.documents.map(docToEmailLog);
+};
+
+// ── Activity Logs ─────────────────────────────────────────────────────────────
+// Stores background-job and sync events for the admin Activity Log tab.
+//
+// Appwrite collection: activity_logs
+// Required attributes:
+//   type        String  size=20   required
+//   status      String  size=10   required
+//   message     String  size=1000 required
+//   client_name String  size=200  nullable
+
+export interface ActivityLog {
+  id: string;
+  type: 'psi' | 'ga' | 'gsc' | 'hubspot' | 'email' | 'mainwp' | 'system';
+  status: 'success' | 'error' | 'info' | 'warn';
+  message: string;
+  client_name: string | null;
+  created_at: string;
+}
+
+function docToActivityLog(doc: Record<string, any>): ActivityLog {
+  return {
+    id:          doc.$id,
+    type:        doc.type,
+    status:      doc.status,
+    message:     doc.message,
+    client_name: doc.client_name ?? null,
+    created_at:  doc.$createdAt,
+  };
+}
+
+export const saveActivityLog = async (
+  entry: Omit<ActivityLog, 'id' | 'created_at'>
+): Promise<void> => {
+  await databases.createDocument(DB_ID, COL_ACTIVITY_LOGS, ID.unique(), {
+    type:        entry.type,
+    status:      entry.status,
+    message:     entry.message,
+    client_name: entry.client_name ?? null,
+  });
+};
+
+export const getActivityLogs = async (limit = 200): Promise<ActivityLog[]> => {
+  const result = await databases.listDocuments(DB_ID, COL_ACTIVITY_LOGS, [
+    Query.orderDesc('$createdAt'),
+    Query.limit(limit),
+  ]);
+  return result.documents.map(docToActivityLog);
 };
