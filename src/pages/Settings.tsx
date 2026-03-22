@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Save, Loader2, Key, FileJson, AlertCircle, Database, Download, Upload, Plus, Users, Tag, Bot, Activity, Share2, Server, Mail } from 'lucide-react';
+import { authFetch } from '../authFetch';
 
 const PAGE_TITLE = 'Stoke Design Website Reporter';
 
@@ -66,7 +67,7 @@ export default function Settings() {
     setSendingTestEmail(true);
     setTestEmailResult(null);
     try {
-      const res = await fetch('/api/admin/test-smtp', {
+      const res = await authFetch('/api/admin/test-smtp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to: testEmailTo }),
@@ -88,7 +89,7 @@ export default function Settings() {
   const fetchSettings = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/settings');
+      const res = await authFetch('/api/admin/settings');
       if (!res.ok) throw new Error('Failed to fetch settings');
       const data = await res.json();
       setFormData({
@@ -139,7 +140,7 @@ export default function Settings() {
         }
       }
 
-      const res = await fetch('/api/admin/settings', {
+      const res = await authFetch('/api/admin/settings', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -208,7 +209,7 @@ export default function Settings() {
 
   const exportClientsCSV = async () => {
     try {
-      const res = await fetch('/api/admin/clients');
+      const res = await authFetch('/api/admin/clients');
       if (!res.ok) throw new Error('Failed to fetch clients');
       const clients: any[] = await res.json();
       const rows = [
@@ -235,7 +236,7 @@ export default function Settings() {
     setImporting(true);
     try {
       for (const client of newClients) {
-        await fetch('/api/admin/clients', {
+        await authFetch('/api/admin/clients', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -246,7 +247,7 @@ export default function Settings() {
       for (const client of clientsToUpdate) {
         const existingClient = importConflicts.find(c => c.imported.slug === client.slug)?.existing;
         if (existingClient) {
-          await fetch(`/api/admin/clients/${existingClient.id}`, {
+          await authFetch(`/api/admin/clients/${existingClient.id}`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -332,7 +333,7 @@ export default function Settings() {
         }
       }
 
-      const res = await fetch('/api/admin/clients');
+      const res = await authFetch('/api/admin/clients');
       if (!res.ok) throw new Error('Failed to fetch existing clients for conflict check');
       const existingClients = await res.json();
 

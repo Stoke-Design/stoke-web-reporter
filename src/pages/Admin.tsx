@@ -7,6 +7,8 @@ const generateRandomSlug = (): string => {
 import { Link } from 'react-router-dom';
 import { Plus, Edit2, Trash2, ExternalLink, LogOut, Loader2, Settings, Search, Users, CheckCircle2, XCircle, RefreshCw, Mail, Send, Activity } from 'lucide-react';
 import { Logo } from '../components/Logo';
+import { useAuth } from '../App';
+import { authFetch } from '../authFetch';
 
 interface Client {
   id: number;
@@ -43,6 +45,8 @@ interface EmailLog {
 }
 
 export default function Admin() {
+  const { signOut } = useAuth();
+
   useEffect(() => {
     document.title = 'Admin | Stoke Design Website Reporter';
   }, []);
@@ -103,7 +107,7 @@ export default function Admin() {
   const fetchEmailLogs = async () => {
     setEmailLogsLoading(true);
     try {
-      const res = await fetch('/api/admin/email-logs');
+      const res = await authFetch('/api/admin/email-logs');
       if (!res.ok) throw new Error('Failed to fetch email logs');
       const data = await res.json();
       setEmailLogs(data);
@@ -117,7 +121,7 @@ export default function Admin() {
   const fetchActivityLogs = async () => {
     setActivityLoading(true);
     try {
-      const res = await fetch('/api/admin/activity-logs');
+      const res = await authFetch('/api/admin/activity-logs');
       if (!res.ok) throw new Error('Failed to fetch activity logs');
       setActivityLogs(await res.json());
     } catch (err: any) {
@@ -130,7 +134,7 @@ export default function Admin() {
   const handleSendTestEmail = async (clientId: number) => {
     setSendingTestEmail(clientId);
     try {
-      const res = await fetch(`/api/admin/clients/${clientId}/send-test-email`, {
+      const res = await authFetch(`/api/admin/clients/${clientId}/send-test-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ period: 'Last 30 Days' }),
@@ -151,7 +155,7 @@ export default function Admin() {
     setSendingReport(true);
     setSendReportStatus(null);
     try {
-      const res = await fetch(`/api/admin/clients/${clientId}/send-test-email`, {
+      const res = await authFetch(`/api/admin/clients/${clientId}/send-test-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ period: 'Last 30 Days' }),
@@ -182,7 +186,7 @@ export default function Admin() {
   const fetchClients = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/clients');
+      const res = await authFetch('/api/admin/clients');
       if (!res.ok) {
         throw new Error('Failed to fetch clients');
       }
@@ -260,7 +264,7 @@ export default function Admin() {
   const fetchGASites = async () => {
     setLoadingGASites(true);
     try {
-      const res = await fetch('/api/admin/google/ga-properties');
+      const res = await authFetch('/api/admin/google/ga-properties');
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to fetch GA properties');
       setGaSites(data);
@@ -275,7 +279,7 @@ export default function Admin() {
   const fetchGSCSites = async () => {
     setLoadingGSCSites(true);
     try {
-      const res = await fetch('/api/admin/google/gsc-sites');
+      const res = await authFetch('/api/admin/google/gsc-sites');
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to fetch GSC sites');
       setGscSites(data);
@@ -291,7 +295,7 @@ export default function Admin() {
     setHubspotSyncAllRunning(true);
     setHubspotSyncAllMsg('Syncing...');
     try {
-      const res = await fetch('/api/admin/hubspot-sync-all', { method: 'POST' });
+      const res = await authFetch('/api/admin/hubspot-sync-all', { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Sync failed');
       setHubspotSyncAllMsg(`✓ ${data.synced} synced, ${data.skipped} skipped, ${data.errors} errors`);
@@ -336,7 +340,7 @@ export default function Admin() {
     if (!confirm('Are you sure you want to delete this client?')) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/clients/${id}`, {
+      const res = await authFetch(`/api/admin/clients/${id}`, {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error('Failed to delete client');
@@ -355,7 +359,7 @@ export default function Admin() {
     setLoading(true);
     try {
       for (const id of selectedClients) {
-        await fetch(`/api/admin/clients/${id}`, {
+        await authFetch(`/api/admin/clients/${id}`, {
           method: 'DELETE',
         });
       }
@@ -371,7 +375,7 @@ export default function Admin() {
   const handleToggleActive = async (client: Client) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/clients/${client.id}`, {
+      const res = await authFetch(`/api/admin/clients/${client.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -394,7 +398,7 @@ export default function Admin() {
       for (const id of selectedClients) {
         const client = clients.find(c => c.id === id);
         if (client) {
-          await fetch(`/api/admin/clients/${id}`, {
+          await authFetch(`/api/admin/clients/${id}`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -472,6 +476,13 @@ export default function Admin() {
                 title="Add Client"
               >
                 <Plus className="w-5 h-5" />
+              </button>
+              <button
+                onClick={async () => { await signOut(); window.location.href = '/login'; }}
+                className="flex items-center justify-center w-10 h-10 bg-white text-gray-400 border border-gray-200 rounded-full hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                title="Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -566,7 +577,10 @@ export default function Admin() {
         {activeTab === 'email-log' && (
           <div className="bg-white rounded-2xl shadow-none border border-gray-200 overflow-hidden">
             <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-900">Email Send History</h3>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Email Send History</h3>
+                {emailLogs.length > 0 && <p className="text-xs text-gray-400 mt-0.5">Last {emailLogs.length} emails</p>}
+              </div>
               <button
                 onClick={fetchEmailLogs}
                 className="p-1.5 text-gray-400 hover:text-gray-900 transition-colors"
@@ -584,35 +598,33 @@ export default function Admin() {
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wider">
-                      <th className="p-4 font-medium">Sent At</th>
+                      <th className="p-4 font-medium w-44">Time</th>
                       <th className="p-4 font-medium">Client</th>
-                      <th className="p-4 font-medium">Website</th>
                       <th className="p-4 font-medium">Recipient</th>
                       <th className="p-4 font-medium">Subject</th>
-                      <th className="p-4 font-medium">Status</th>
+                      <th className="p-4 font-medium w-20">Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {emailLogs.map(log => (
                       <tr key={log.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                        <td className="p-4 text-gray-500 whitespace-nowrap">
-                          {new Date(log.created_at).toLocaleString()}
+                        <td className="p-4 text-gray-400 text-xs whitespace-nowrap font-mono">
+                          {new Date(log.created_at).toLocaleString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
                         </td>
-                        <td className="p-4 font-medium text-gray-900">{log.client_name}</td>
-                        <td className="p-4 text-gray-500 text-xs">{log.website_url || '—'}</td>
-                        <td className="p-4 text-gray-600">{log.recipient_email}</td>
-                        <td className="p-4 text-gray-600 max-w-xs truncate" title={log.subject}>{log.subject}</td>
+                        <td className="p-4 text-gray-600 text-xs">{log.client_name}</td>
+                        <td className="p-4 text-gray-600 text-xs">{log.recipient_email}</td>
+                        <td className="p-4 text-gray-700 text-xs max-w-xs truncate" title={log.subject}>{log.subject}</td>
                         <td className="p-4">
                           {log.status === 'sent' ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-full">
-                              <CheckCircle2 className="w-3 h-3" />Sent
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+                              Sent
                             </span>
                           ) : (
                             <span
-                              className="inline-flex items-center gap-1 px-2 py-1 bg-red-50 text-red-600 text-xs font-medium rounded-full cursor-help"
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-600 cursor-help"
                               title={log.error || ''}
                             >
-                              <XCircle className="w-3 h-3" />Failed
+                              Failed
                             </span>
                           )}
                         </td>
@@ -678,7 +690,7 @@ export default function Admin() {
                       return (
                         <tr key={entry.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                           <td className="p-4 text-gray-400 text-xs whitespace-nowrap font-mono">
-                            {new Date(entry.timestamp).toLocaleString()}
+                            {new Date(entry.timestamp).toLocaleString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
                           </td>
                           <td className="p-4">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${typeColors[entry.type] || 'bg-gray-100 text-gray-600'}`}>
@@ -795,7 +807,7 @@ export default function Admin() {
                     </td>
                     <td className="p-4">
                       <div className="flex gap-2">
-                        {client.ga_property_id && <span className="px-2 py-1 bg-blue-900/20 text-blue-300 text-xs rounded-md font-medium">GA</span>}
+                        {client.ga_property_id && <span className="px-2 py-1 bg-blue-900/20 text-xs rounded-md font-medium" style={{color:'#1a8af1'}}>GA</span>}
                         {client.gsc_site_url && <span className="px-2 py-1 bg-purple-900/20 text-purple-700 text-xs rounded-md font-medium">GSC</span>}
                         {client.psi_url && <span className="px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md font-medium">PSI</span>}
                         {client.uptime_kuma_slug && <span className="px-2 py-1 bg-emerald-50 text-emerald-700 text-xs rounded-md font-medium">Uptime</span>}
@@ -1165,7 +1177,7 @@ export default function Admin() {
                           setHubspotSyncing(true);
                           setHubspotSyncMsg('');
                           try {
-                            const res = await fetch(`/api/admin/clients/${editingClient.id}/hubspot-sync`, { method: 'POST' });
+                            const res = await authFetch(`/api/admin/clients/${editingClient.id}/hubspot-sync`, { method: 'POST' });
                             const data = await res.json();
                             if (!res.ok) throw new Error(data.error || 'Sync failed');
                             setHubspotSyncMsg('✓ Synced successfully');

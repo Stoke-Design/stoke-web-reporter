@@ -54,7 +54,8 @@ function addLog(
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || '3000', 10);
+  const APP_BASE_URL = process.env.APP_BASE_URL || 'https://reports.stokedesign.co';
 
   // --- Background Job for PSI ---
   let isPSIRunning = false;
@@ -229,15 +230,20 @@ async function startServer() {
   // Runs every hour; checks configured send-hour before processing.
   let isEmailJobRunning = false;
   const runMonthlyEmailJob = async () => {
-    if (isEmailJobRunning) return;
+    if (isEmailJobRunning) { console.log('[EmailJob] Already running, skipping'); return; }
     isEmailJobRunning = true;
     try {
-      // Respect the configured send hour (default 9am) — use Melbourne timezone
       const melbNow = toZonedTime(new Date(), 'Australia/Melbourne');
+      const currentHour = melbNow.getHours();
       const sendHour = parseInt((await getSetting('report_send_hour')) || '9', 10);
-      if (melbNow.getHours() !== sendHour) return;
+      console.log(`[EmailJob] Checking — Melbourne hour: ${currentHour}, configured send hour: ${sendHour}`);
+      if (currentHour !== sendHour) {
+        console.log(`[EmailJob] Hour mismatch (${currentHour} ≠ ${sendHour}), skipping`);
+        return;
+      }
 
       const today = `${melbNow.getFullYear()}-${String(melbNow.getMonth() + 1).padStart(2, '0')}-${String(melbNow.getDate()).padStart(2, '0')}`;
+      console.log(`[EmailJob] Hour matched! Today is ${today}, checking clients...`);
       const clients = await getClients();
       const serverToken = await getSetting('postmark_server_token');
       const fromEmail   = await getSetting('smtp_from_email');
@@ -245,6 +251,7 @@ async function startServer() {
       const replyTo     = (await getSetting('smtp_reply_to')) || undefined;
 
       if (!serverToken || !fromEmail) {
+        console.log('[EmailJob] Skipped — Postmark SMTP not configured');
         addLog('email', 'warn', 'Monthly email job skipped — Postmark SMTP not configured in Settings');
         return;
       }
@@ -252,9 +259,12 @@ async function startServer() {
       let emailsSent = 0, emailsFailed = 0;
 
       for (const client of clients) {
-        if (!client.is_active || !client.contact_email) continue;
-        if (client.email_notifications === 0) continue;
-        if (client.next_send_date !== today) continue;
+        if (!client.is_active) { console.log(`[EmailJob] ${client.name}: skipped (inactive)`); continue; }
+        if (!client.contact_email) { console.log(`[EmailJob] ${client.name}: skipped (no contact_email)`); continue; }
+        if (client.email_notifications === 0) { console.log(`[EmailJob] ${client.name}: skipped (notifications disabled)`); continue; }
+        if (client.next_send_date !== today) { console.log(`[EmailJob] ${client.name}: skipped (next_send_date=${client.next_send_date} ≠ ${today})`); continue; }
+
+        console.log(`[EmailJob] ${client.name}: ELIGIBLE — sending to ${client.contact_email}...`);
 
         const month = format(new Date(), 'MMMM yyyy');
         let reportSummary = '';
@@ -263,7 +273,7 @@ async function startServer() {
           reportSummary = report?.summary || '';
         } catch { /* proceed without summary */ }
 
-        const dashboardUrl = `https://reports.stokedesign.co/${client.slug}`;
+        const dashboardUrl = `${APP_BASE_URL}/${client.slug}`;
         const { subject, html } = buildMonthlyReportEmail({
           firstName:    client.first_name || client.name,
           clientName:   client.name,
@@ -281,7 +291,7 @@ async function startServer() {
           });
           // Advance next_send_date by one month
           await setClientEmailFields(client.id, { next_send_date: advanceNextSendDate(today) });
-          console.log(`[Email] Sent monthly report to ${client.contact_email} for ${client.name}`);
+          console.log(`[EmailJob] ✓ Sent monthly report to ${client.contact_email} for ${client.name}`);
           addLog('email', 'success', `Monthly report sent to ${client.contact_email}`, client.name);
           // Fire report.emailed webhook
           Promise.all([getSetting('webhook_url'), getSetting('webhook_secret'), getSetting('webhook_events_enabled')])
@@ -297,26 +307,30 @@ async function startServer() {
             website_url: client.website_url, recipient_email: client.contact_email,
             subject, status: 'failed', error: err.message,
           });
-          console.error(`[Email] Failed to send to ${client.contact_email}:`, err.message);
+          console.error(`[EmailJob] ✗ Failed to send to ${client.contact_email}:`, err.message);
           addLog('email', 'error', `Monthly report failed: ${err.message}`, client.name);
           emailsFailed++;
         }
       }
 
       if (emailsSent + emailsFailed > 0) {
+        console.log(`[EmailJob] Complete — ${emailsSent} sent, ${emailsFailed} failed`);
         addLog('email', emailsFailed > 0 ? 'warn' : 'success', `Monthly email job complete — ${emailsSent} sent, ${emailsFailed} failed`);
+      } else {
+        console.log('[EmailJob] No eligible clients found for today');
       }
     } catch (err: any) {
-      console.error('[Email] Monthly email job error:', err.message);
+      console.error('[EmailJob] Job error:', err.message);
       addLog('email', 'error', `Monthly email job error: ${err.message}`);
     } finally {
       isEmailJobRunning = false;
     }
   };
 
-  const ONE_HOUR = 60 * 60 * 1000;
-  setInterval(runMonthlyEmailJob, ONE_HOUR); // Hourly — exits early unless current hour matches report_send_hour
-  setTimeout(runMonthlyEmailJob, 15000);     // Startup check (will exit early unless hour matches)
+  const FIFTEEN_MIN = 15 * 60 * 1000;
+  setInterval(runMonthlyEmailJob, FIFTEEN_MIN);
+  setTimeout(runMonthlyEmailJob, 15000);
+  console.log('[EmailJob] Registered — will check in 15s then every 15min');
 
   // ── Weekly HubSpot resync — every Sunday at 9:00 am ──────────────────────────
   const runWeeklyHubSpotSync = async () => {
@@ -344,7 +358,7 @@ async function startServer() {
           if (!sub) { skipped++; continue; }
 
           // Push reporter URL → HubSpot (fire-and-forget)
-          pushReporterUrlToHubSpot(token, sub.recordId, `https://reports.stokedesign.co/${client.slug}`)
+          pushReporterUrlToHubSpot(token, sub.recordId, `${APP_BASE_URL}/${client.slug}`)
             .catch(e => console.warn(`[WeeklySync] Push URL failed for ${client.name}:`, e.message));
 
           // Pull care_plan
@@ -405,9 +419,28 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Simple auth middleware for admin routes (Removed)
-  const requireAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    next();
+  // Auth middleware — validates Appwrite JWT via server-side SDK
+  const requireAdmin = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    try {
+      const authHeader = req.headers.authorization || '';
+      const jwt = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+
+      if (!jwt) {
+        return res.status(401).json({ error: 'Not authenticated' });
+      }
+
+      // Create a JWT-scoped Appwrite client to verify the token is valid
+      const { Client: AWClient, Account: AWAccount } = await import('node-appwrite');
+      const jwtClient = new AWClient()
+        .setEndpoint(process.env.APPWRITE_ENDPOINT || '')
+        .setProject(process.env.APPWRITE_PROJECT_ID || '')
+        .setJWT(jwt);
+      const account = new AWAccount(jwtClient);
+      await account.get(); // throws if JWT is invalid or expired
+      next();
+    } catch {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
   };
 
   // --- API Routes ---
@@ -635,7 +668,7 @@ async function startServer() {
           if (!accessToken) return;
           const sub = await getHubSpotSubscriptionByUrl(accessToken, client.website_url!).catch(() => null);
           if (!sub?.recordId) return;
-          pushReporterUrlToHubSpot(accessToken, sub.recordId, `https://reports.stokedesign.co/${client.slug}`).catch(e => console.warn('[HubSpot] Push failed:', e.message));
+          pushReporterUrlToHubSpot(accessToken, sub.recordId, `${APP_BASE_URL}/${client.slug}`).catch(e => console.warn('[HubSpot] Push failed:', e.message));
           if (sub.carePlan !== undefined) {
             setClientCarePlan(client.id, sub.carePlan).catch(e => console.warn('[HubSpot] care_plan sync failed:', e.message));
           }
@@ -690,15 +723,16 @@ async function startServer() {
       if (req.body.next_send_date  !== undefined) emailFields.next_send_date  = req.body.next_send_date  || null;
       if (req.body.email_notifications !== undefined) emailFields.email_notifications = req.body.email_notifications !== 0 && req.body.email_notifications !== false;
       if (Object.keys(emailFields).length > 0) {
-        setClientEmailFields(req.params.id, emailFields).catch(e => console.warn('[email_fields] save failed:', e.message));
+        await setClientEmailFields(req.params.id, emailFields);
       }
+
+      // Re-fetch the fully-patched document so the response includes email fields
+      const updatedClient = await getClientById(req.params.id);
 
       // Invalidate report cache → forces fresh AI summary on next dashboard visit
       clearClientReportCache(req.params.id).catch(() => {});
       // Pre-generate fresh report in background using updated client data
-      getClientById(req.params.id).then(updated => {
-        if (updated) generateReportOverview(updated).catch(() => {});
-      }).catch(() => {});
+      if (updatedClient) generateReportOverview(updatedClient).catch(() => {});
 
       // Fire webhook (fire-and-forget)
       Promise.all([getSetting('webhook_url'), getSetting('webhook_secret'), getSetting('webhook_events_enabled')]).then(([url, secret, events]) => {
@@ -712,14 +746,14 @@ async function startServer() {
           if (!accessToken) return;
           const sub = await getHubSpotSubscriptionByUrl(accessToken, client.website_url!).catch(() => null);
           if (!sub?.recordId) return;
-          pushReporterUrlToHubSpot(accessToken, sub.recordId, `https://reports.stokedesign.co/${client.slug}`).catch(e => console.warn('[HubSpot] Push failed:', e.message));
+          pushReporterUrlToHubSpot(accessToken, sub.recordId, `${APP_BASE_URL}/${client.slug}`).catch(e => console.warn('[HubSpot] Push failed:', e.message));
           if (sub.carePlan !== undefined) {
             setClientCarePlan(client.id, sub.carePlan).catch(e => console.warn('[HubSpot] care_plan sync failed:', e.message));
           }
         }).catch(() => {});
       }
 
-      res.json(client);
+      res.json(updatedClient || client);
     } catch (err: any) {
       console.error('[Update client] Error:', err.message);
       res.status(400).json({ error: err.message });
@@ -1171,7 +1205,7 @@ async function startServer() {
       if (!sub) return res.status(404).json({ error: 'No HubSpot subscription found matching this website URL' });
 
       // Push report URL → HubSpot
-      await pushReporterUrlToHubSpot(token, sub.recordId, `https://reports.stokedesign.co/${client.slug}`);
+      await pushReporterUrlToHubSpot(token, sub.recordId, `${APP_BASE_URL}/${client.slug}`);
 
       // Pull care_plan → Appwrite
       if (sub.carePlan !== null && sub.carePlan !== undefined) {
@@ -1229,7 +1263,7 @@ async function startServer() {
             continue;
           }
           // Push report URL → HubSpot
-          await pushReporterUrlToHubSpot(token, sub.recordId, `https://reports.stokedesign.co/${client.slug}`);
+          await pushReporterUrlToHubSpot(token, sub.recordId, `${APP_BASE_URL}/${client.slug}`);
           // Pull care_plan → Appwrite
           if (sub.carePlan !== undefined) {
             await setClientCarePlan(client.id, sub.carePlan);
@@ -1317,7 +1351,6 @@ async function startServer() {
       const fromEmail   = await getSetting('smtp_from_email');
       const fromName    = (await getSetting('smtp_from_name')) || 'Stoke Design';
       const replyTo     = (await getSetting('smtp_reply_to')) || undefined;
-      const appBaseUrl  = process.env.APP_BASE_URL || 'https://reports.stokedesign.co';
 
       if (!serverToken || !fromEmail) {
         return res.status(500).json({ error: 'Postmark SMTP not configured in Settings' });
@@ -1336,7 +1369,7 @@ async function startServer() {
       const { subject, html } = buildMonthlyReportEmail({
         firstName:    client.first_name || client.name,
         clientName:   client.name,
-        dashboardUrl: `${appBaseUrl}/${client.slug}`,
+        dashboardUrl: `${APP_BASE_URL}/${client.slug}`,
         month:        format(new Date(), 'MMMM yyyy'),
         period,
         reportSummary,
@@ -1420,7 +1453,6 @@ async function startServer() {
       if (action === 'refresh_psi') {
         const client = await getClientBySlug(slug);
         if (!client || !client.psi_url) return res.status(404).json({ error: 'Client not found or PSI not configured' });
-        const apiKey = await getSetting('google_api_key');
         const data = await fetchPSIData(client.psi_url, 'mobile');
         await savePSISnapshot(client.id, 'mobile', slimPSIData(data));
         const dataDesktop = await fetchPSIData(client.psi_url, 'desktop');
@@ -1622,7 +1654,11 @@ async function startServer() {
   app.get('/api/config', async (req, res) => {
     try {
       const gtmContainerId = await getSetting('gtm_container_id') || '';
-      res.json({ gtm_container_id: gtmContainerId });
+      res.json({
+        gtm_container_id: gtmContainerId,
+        appwrite_endpoint: process.env.APPWRITE_ENDPOINT || '',
+        appwrite_project_id: process.env.APPWRITE_PROJECT_ID || '',
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

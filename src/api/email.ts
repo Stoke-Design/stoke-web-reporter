@@ -23,10 +23,10 @@ export function buildMonthlyReportEmail(params: {
   // Convert report summary paragraphs into HTML <p> tags
   const summaryHtml = reportSummary
     ? reportSummary
-        .split(/\n\n+/)
-        .filter(p => p.trim())
-        .map(p => `<p style="margin:0 0 16px 0;line-height:1.7;color:#374151;">${p.trim()}</p>`)
-        .join('')
+      .split(/\n\n+/)
+      .filter(p => p.trim())
+      .map(p => `<p style="margin:0 0 16px 0;line-height:1.7;color:#374151;">${p.trim()}</p>`)
+      .join('')
     : '';
 
   const html = `<!DOCTYPE html>
@@ -61,7 +61,7 @@ export function buildMonthlyReportEmail(params: {
               ${summaryHtml || `<p style="margin:0 0 16px 0;line-height:1.7;color:#374151;">Your ${periodLabel} website performance report is now ready to view. Head to your dashboard for a full breakdown of how your site is performing.</p>`}
 
               <!-- Contact line -->
-              <p style="margin:0 0 24px 0;font-size:14px;line-height:1.7;color:#6b7280;">If you have any questions about your report, please don't hesitate to reach out to the Stoke team at <a href="mailto:web@stokedesign.co" style="color:#e35e3d;text-decoration:none;">web@stokedesign.co</a> or call us on <strong style="color:#374151;">03&nbsp;5312&nbsp;7136</strong>. &mdash; The Stoke Design Team</p>
+              <p style="margin:0 0 24px 0;font-size:14px;line-height:1.7;color:#6b7280;">If you have any questions about your report, please don't hesitate to reach out to the Stoke team at <a href="mailto:web@stokedesign.co" style="color:#e35e3d;text-decoration:none;">web@stokedesign.co</a> or call us on <strong style="color:#374151;">03&nbsp;5312&nbsp;7136</strong>. <br><br>The Stoke Design Team</p>
 
               <!-- CTA Button -->
               <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 32px 0;">
@@ -82,7 +82,7 @@ export function buildMonthlyReportEmail(params: {
           <!-- Footer -->
           <tr>
             <td style="background-color:#0a0a0a;padding:24px 40px;">
-              <p style="margin:0;font-size:11px;line-height:1.6;color:#6b7280;">Data presented in this report is sourced from Google Search Console, Google Analytics 4, MainWP, PageSpeed Insights, and Uptime Monitor. Figures may vary between platforms due to differences in data collection methods and attribution. All data is provided for indicative purposes only. &copy; 2026 Stoke Design Co Pty Ltd T/A Stoke Design&trade;. All Rights Reserved.</p>
+              <p style="margin:0;font-size:11px;line-height:1.6;color:#6b7280;">Data presented in this report is sourced from Google Search Console, Google Analytics 4, MainWP, PageSpeed Insights, and Uptime Monitor. Figures may vary between platforms due to differences in data collection methods and attribution. All data is provided for indicative purposes only.<br><br> &copy; 2026 Stoke Design Co Pty Ltd T/A Stoke Design&trade;. All Rights Reserved.</p>
             </td>
           </tr>
 
