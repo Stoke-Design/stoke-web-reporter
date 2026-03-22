@@ -11,13 +11,13 @@ const client = new Client()
 const databases = new Databases(client);
 
 const DB_ID    = process.env.APPWRITE_DATABASE_ID!;
-const COL_CLIENTS  = process.env.APPWRITE_COLLECTION_CLIENTS!;
-const COL_SETTINGS = process.env.APPWRITE_COLLECTION_SETTINGS!;
-const COL_PSI      = process.env.APPWRITE_COLLECTION_PSI_SNAPSHOTS!;
-const COL_GA       = process.env.APPWRITE_COLLECTION_GA_METRICS!;
-const COL_GSC      = process.env.APPWRITE_COLLECTION_GSC_METRICS!;
-const COL_EMAIL_LOGS    = process.env.APPWRITE_COLLECTION_EMAIL_LOGS!;
-const COL_ACTIVITY_LOGS = process.env.APPWRITE_COLLECTION_ACTIVITY_LOGS!;
+const COL_CLIENTS       = process.env.APPWRITE_COLLECTION_CLIENTS       || 'clients';
+const COL_SETTINGS      = process.env.APPWRITE_COLLECTION_SETTINGS      || 'settings';
+const COL_PSI           = process.env.APPWRITE_COLLECTION_PSI_SNAPSHOTS || 'psi_snapshots';
+const COL_GA            = process.env.APPWRITE_COLLECTION_GA_METRICS    || 'ga_metrics';
+const COL_GSC           = process.env.APPWRITE_COLLECTION_GSC_METRICS   || 'gsc_metrics';
+const COL_EMAIL_LOGS    = process.env.APPWRITE_COLLECTION_EMAIL_LOGS    || 'email_logs';
+const COL_ACTIVITY_LOGS = process.env.APPWRITE_COLLECTION_ACTIVITY_LOGS || 'activity_logs';
 
 // ── Interfaces ───────────────────────────────────────────────────────────────
 export interface Client_ {

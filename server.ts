@@ -1,5 +1,5 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
+import path from 'path';
 import { getClients, getClientById, getClientBySlug, createClient, updateClient, deleteClient, setClientCarePlan, setClientEmailFields, getSetting, setSetting, getLatestPSISnapshot, savePSISnapshot, saveGAMetrics, saveGSCMetrics, getGAMetrics, getGSCMetrics, getPSISnapshots, getClientReportCache, setClientReportCache, clearClientReportCache, saveEmailLog, getEmailLogs, getEmailLogsByClient, saveActivityLog, getActivityLogs } from './src/db.js';
 import { fetchGAData, fetchGSCData, fetchPSIData, slimPSIData, listGASites, listGSCSites } from './src/api/google.js';
 import { getUptimeKumaData, clearUptimeKumaCache } from './src/api/uptimeKuma.js';
@@ -438,7 +438,8 @@ async function startServer() {
       const account = new AWAccount(jwtClient);
       await account.get(); // throws if JWT is invalid or expired
       next();
-    } catch {
+    } catch (err: any) {
+      console.warn('[requireAdmin] JWT validation failed:', err.message);
       return res.status(401).json({ error: 'Not authenticated' });
     }
   };
@@ -1664,8 +1665,15 @@ async function startServer() {
     }
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV === 'production') {
+    // Serve built React frontend and SPA fallback
+    app.use(express.static(path.join(process.cwd(), 'dist')));
+    app.get('*', (_req, res) => {
+      res.sendFile(path.join(process.cwd(), 'dist', 'index.html'));
+    });
+  } else {
+    // Development: Vite dev server with HMR (dynamic import — vite is a devDependency)
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
