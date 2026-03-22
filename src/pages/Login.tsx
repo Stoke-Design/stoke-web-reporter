@@ -32,13 +32,11 @@ export default function Login() {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="flex justify-center mb-8">
-          <div className="bg-gray-900 rounded-2xl p-4">
-            <Logo />
-          </div>
+          <Logo className="h-8 w-auto text-black" />
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-200 p-8">
-          <h1 className="text-xl font-semibold text-gray-900 text-center mb-6">Sign in to Reporter</h1>
+          <h1 className="text-xl font-semibold text-gray-900 text-center mb-6">Stoke Web Reporting Suite</h1>
 
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600">

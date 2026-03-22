@@ -256,10 +256,12 @@ export default function Admin() {
   const [showGASites, setShowGASites] = useState(false);
   const [gaSites, setGaSites] = useState<any[]>([]);
   const [loadingGASites, setLoadingGASites] = useState(false);
+  const [gaSearch, setGaSearch] = useState('');
 
   const [showGSCSites, setShowGSCSites] = useState(false);
   const [gscSites, setGscSites] = useState<any[]>([]);
   const [loadingGSCSites, setLoadingGSCSites] = useState(false);
+  const [gscSearch, setGscSearch] = useState('');
 
   const fetchGASites = async () => {
     setLoadingGASites(true);
@@ -268,6 +270,7 @@ export default function Admin() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to fetch GA properties');
       setGaSites(data);
+      setGaSearch('');
       setShowGASites(true);
     } catch (err: any) {
       alert('Error fetching GA properties: ' + err.message);
@@ -283,6 +286,7 @@ export default function Admin() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to fetch GSC sites');
       setGscSites(data);
+      setGscSearch('');
       setShowGSCSites(true);
     } catch (err: any) {
       alert('Error fetching GSC sites: ' + err.message);
@@ -1065,25 +1069,44 @@ export default function Admin() {
                     </button>
                   </div>
                   {showGASites && (
-                    <div className="mt-2 p-2 border border-gray-200 rounded-xl max-h-40 overflow-y-auto bg-gray-50">
-                      {gaSites.length === 0 ? (
-                        <p className="text-xs text-gray-500 p-2">No properties found. Check Service Account permissions.</p>
-                      ) : (
-                        gaSites.map((site: any) => (
-                          <button
-                            key={site.id}
-                            type="button"
-                            onClick={() => {
-                              setFormData({ ...formData, ga_property_id: site.id });
-                              setShowGASites(false);
-                            }}
-                            className="w-full text-left px-3 py-2 hover:bg-gray-50 hover:shadow-none rounded-lg text-sm transition-all flex justify-between items-center group"
-                          >
-                            <span className="font-medium text-gray-600">{site.name}</span>
-                            <span className="text-xs text-gray-400 group-hover:text-gray-500">{site.id}</span>
-                          </button>
-                        ))
-                      )}
+                    <div className="mt-2 border border-gray-200 rounded-xl bg-white overflow-hidden">
+                      <div className="p-2 border-b border-gray-100">
+                        <input
+                          type="text"
+                          autoFocus
+                          value={gaSearch}
+                          onChange={(e) => setGaSearch(e.target.value)}
+                          placeholder="Search properties..."
+                          className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        />
+                      </div>
+                      <div className="max-h-48 overflow-y-auto p-1">
+                        {gaSites.length === 0 ? (
+                          <p className="text-xs text-gray-500 p-2">No properties found. Check Service Account permissions.</p>
+                        ) : (() => {
+                          const filtered = gaSites.filter((s: any) =>
+                            s.name.toLowerCase().includes(gaSearch.toLowerCase()) ||
+                            s.id.toLowerCase().includes(gaSearch.toLowerCase())
+                          );
+                          return filtered.length === 0 ? (
+                            <p className="text-xs text-gray-400 p-2 text-center">No matches</p>
+                          ) : filtered.map((site: any) => (
+                            <button
+                              key={site.id}
+                              type="button"
+                              onClick={() => {
+                                setFormData({ ...formData, ga_property_id: site.id });
+                                setShowGASites(false);
+                                setGaSearch('');
+                              }}
+                              className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded-lg text-sm transition-all flex justify-between items-center group"
+                            >
+                              <span className="font-medium text-gray-700">{site.name}</span>
+                              <span className="text-xs text-gray-400 group-hover:text-gray-500">{site.id}</span>
+                            </button>
+                          ));
+                        })()}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1111,25 +1134,43 @@ export default function Admin() {
                     </button>
                   </div>
                   {showGSCSites && (
-                    <div className="mt-2 p-2 border border-gray-200 rounded-xl max-h-40 overflow-y-auto bg-gray-50">
-                      {gscSites.length === 0 ? (
-                        <p className="text-xs text-gray-500 p-2">No sites found. Check Service Account permissions.</p>
-                      ) : (
-                        gscSites.map((site: any) => (
-                          <button
-                            key={site.siteUrl}
-                            type="button"
-                            onClick={() => {
-                              setFormData({ ...formData, gsc_site_url: site.siteUrl });
-                              setShowGSCSites(false);
-                            }}
-                            className="w-full text-left px-3 py-2 hover:bg-gray-50 hover:shadow-none rounded-lg text-sm transition-all flex flex-col group"
-                          >
-                            <span className="font-medium text-gray-600">{site.siteUrl}</span>
-                            <span className="text-xs text-gray-400 group-hover:text-gray-500">Permission: {site.permissionLevel}</span>
-                          </button>
-                        ))
-                      )}
+                    <div className="mt-2 border border-gray-200 rounded-xl bg-white overflow-hidden">
+                      <div className="p-2 border-b border-gray-100">
+                        <input
+                          type="text"
+                          autoFocus
+                          value={gscSearch}
+                          onChange={(e) => setGscSearch(e.target.value)}
+                          placeholder="Search sites..."
+                          className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        />
+                      </div>
+                      <div className="max-h-48 overflow-y-auto p-1">
+                        {gscSites.length === 0 ? (
+                          <p className="text-xs text-gray-500 p-2">No sites found. Check Service Account permissions.</p>
+                        ) : (() => {
+                          const filtered = gscSites.filter((s: any) =>
+                            s.siteUrl.toLowerCase().includes(gscSearch.toLowerCase())
+                          );
+                          return filtered.length === 0 ? (
+                            <p className="text-xs text-gray-400 p-2 text-center">No matches</p>
+                          ) : filtered.map((site: any) => (
+                            <button
+                              key={site.siteUrl}
+                              type="button"
+                              onClick={() => {
+                                setFormData({ ...formData, gsc_site_url: site.siteUrl });
+                                setShowGSCSites(false);
+                                setGscSearch('');
+                              }}
+                              className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded-lg text-sm transition-all flex flex-col group"
+                            >
+                              <span className="font-medium text-gray-700">{site.siteUrl}</span>
+                              <span className="text-xs text-gray-400 group-hover:text-gray-500">Permission: {site.permissionLevel}</span>
+                            </button>
+                          ));
+                        })()}
+                      </div>
                     </div>
                   )}
                 </div>

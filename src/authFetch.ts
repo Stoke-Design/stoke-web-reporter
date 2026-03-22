@@ -1,7 +1,12 @@
 import { getJWT } from './auth';
 
-/** Wrapper around fetch that attaches the Appwrite JWT for admin API calls.
- *  If the server returns 401, redirects to the login page. */
+/** Called when the server returns 401 — set by App.tsx to clear React auth state */
+let onUnauthorized: (() => void) | null = null;
+export function setOnUnauthorized(cb: () => void) {
+  onUnauthorized = cb;
+}
+
+/** Wrapper around fetch that attaches the Appwrite JWT for admin API calls. */
 export async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const jwt = getJWT();
   const headers = new Headers(options.headers);
@@ -11,7 +16,11 @@ export async function authFetch(url: string, options: RequestInit = {}): Promise
   const res = await fetch(url, { ...options, headers });
   if (res.status === 401) {
     localStorage.removeItem('appwrite_jwt');
-    window.location.href = '/login';
+    if (onUnauthorized) {
+      onUnauthorized(); // Clears React user state → Login shows form, not redirect
+    } else {
+      window.location.href = '/login';
+    }
   }
   return res;
 }

@@ -5,6 +5,7 @@ import Settings from './pages/Settings';
 import Login from './pages/Login';
 import ClientDashboard from './pages/ClientDashboard';
 import { initAuth, getCurrentUser, logout } from './auth';
+import { setOnUnauthorized } from './authFetch';
 import { Loader2 } from 'lucide-react';
 
 declare global {
@@ -76,6 +77,13 @@ export default function App() {
     await logout();
     setUser(null);
   };
+
+  // When authFetch receives a 401, clear user state so Login shows the form (not a redirect)
+  useEffect(() => {
+    setOnUnauthorized(() => {
+      setUser(null);
+    });
+  }, []);
 
   if (!authReady) {
     return (

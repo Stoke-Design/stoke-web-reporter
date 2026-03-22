@@ -16,12 +16,15 @@ export function getAccount(): Account {
   return account;
 }
 
-/** Try to get the current session user. Returns null if not logged in. */
+/** Try to get the current session user. Also refreshes the JWT so authFetch always has a valid token. */
 export async function getCurrentUser() {
   try {
-    return await getAccount().get();
+    const user = await getAccount().get();
+    // Always refresh JWT when session is confirmed valid
+    const jwtResponse = await getAccount().createJWT(3600);
+    localStorage.setItem(JWT_KEY, jwtResponse.jwt);
+    return user;
   } catch {
-    // Session expired or not logged in — clear stored JWT
     localStorage.removeItem(JWT_KEY);
     return null;
   }
@@ -30,8 +33,7 @@ export async function getCurrentUser() {
 /** Email + password login — creates session then obtains a JWT for server-side validation */
 export async function login(email: string, password: string) {
   await getAccount().createEmailPasswordSession(email, password);
-  // Create a JWT so we can pass it to our Express backend
-  const jwtResponse = await getAccount().createJWT(3600); // 1 hour max
+  const jwtResponse = await getAccount().createJWT(3600);
   localStorage.setItem(JWT_KEY, jwtResponse.jwt);
   return jwtResponse;
 }
