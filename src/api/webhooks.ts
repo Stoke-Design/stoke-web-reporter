@@ -7,7 +7,8 @@ export type WebhookEventName =
   | 'client.updated'
   | 'psi.completed'
   | 'uptime.alert'
-  | 'report.viewed';
+  | 'report.viewed'
+  | 'report.emailed';
 
 export interface WebhookPayload {
   event: WebhookEventName;

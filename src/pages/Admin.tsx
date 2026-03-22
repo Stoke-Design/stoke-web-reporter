@@ -5,8 +5,10 @@ const generateRandomSlug = (): string => {
   return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 };
 import { Link } from 'react-router-dom';
-import { Plus, Edit2, Trash2, ExternalLink, LogOut, Loader2, Settings, Search, Users, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
+import { Plus, Edit2, Trash2, ExternalLink, LogOut, Loader2, Settings, Search, Users, CheckCircle2, XCircle, RefreshCw, Mail, Send, Activity } from 'lucide-react';
 import { Logo } from '../components/Logo';
+import { useAuth } from '../App';
+import { authFetch } from '../authFetch';
 
 interface Client {
   id: number;
@@ -21,10 +23,30 @@ interface Client {
   uptime_kuma_slug: string | null;
   mainwp_site_id: string | null;
   care_plan: string | null;
+  contact_email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  next_send_date: string | null;
+  hubspot_record_id: string | null;
+  email_notifications: number;
   is_active: number;
 }
 
+interface EmailLog {
+  id: string;
+  client_id: string;
+  client_name: string;
+  website_url: string | null;
+  recipient_email: string;
+  subject: string;
+  status: 'sent' | 'failed';
+  error: string | null;
+  created_at: string;
+}
+
 export default function Admin() {
+  const { signOut } = useAuth();
+
   useEffect(() => {
     document.title = 'Admin | Stoke Design Website Reporter';
   }, []);
@@ -43,7 +65,6 @@ export default function Admin() {
     name: '',
     slug: '',
     website_url: '',
-
     enabled_pages: '[1,2,3,4,5,6,7,8,9]',
     ga_property_id: '',
     gsc_site_url: '',
@@ -51,8 +72,103 @@ export default function Admin() {
     uptime_kuma_slug: '',
     mainwp_site_id: '',
     care_plan: '',
+    contact_email: '',
+    first_name: '',
+    last_name: '',
+    next_send_date: '',
+    hubspot_record_id: '',
+    email_notifications: 1,
     is_active: 1,
   });
+
+  const [activeTab, setActiveTab] = useState<'clients' | 'email-log' | 'activity-log'>('clients');
+
+  // Email log
+  const [emailLogs, setEmailLogs] = useState<EmailLog[]>([]);
+  const [emailLogsLoading, setEmailLogsLoading] = useState(false);
+
+  // Activity log
+  interface ActivityEntry {
+    id: string;
+    timestamp: string;
+    type: 'psi' | 'ga' | 'gsc' | 'hubspot' | 'email' | 'mainwp' | 'system';
+    status: 'success' | 'error' | 'info' | 'warn';
+    message: string;
+    client?: string;
+  }
+  const [activityLogs, setActivityLogs] = useState<ActivityEntry[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [sendingTestEmail, setSendingTestEmail] = useState<number | null>(null);
+
+  // Send Report Now state (inside edit modal)
+  const [sendingReport, setSendingReport] = useState(false);
+  const [sendReportStatus, setSendReportStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  const fetchEmailLogs = async () => {
+    setEmailLogsLoading(true);
+    try {
+      const res = await authFetch('/api/admin/email-logs');
+      if (!res.ok) throw new Error('Failed to fetch email logs');
+      const data = await res.json();
+      setEmailLogs(data);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setEmailLogsLoading(false);
+    }
+  };
+
+  const fetchActivityLogs = async () => {
+    setActivityLoading(true);
+    try {
+      const res = await authFetch('/api/admin/activity-logs');
+      if (!res.ok) throw new Error('Failed to fetch activity logs');
+      setActivityLogs(await res.json());
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setActivityLoading(false);
+    }
+  };
+
+  const handleSendTestEmail = async (clientId: number) => {
+    setSendingTestEmail(clientId);
+    try {
+      const res = await authFetch(`/api/admin/clients/${clientId}/send-test-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ period: 'Last 30 Days' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send report');
+      alert(`Report sent successfully to ${data.sentTo}`);
+      if (activeTab === 'email-log') fetchEmailLogs();
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    } finally {
+      setSendingTestEmail(null);
+    }
+  };
+
+  // Send Report Now — called from inside the edit modal with period = "Last 30 Days"
+  const handleSendReportNow = async (clientId: string) => {
+    setSendingReport(true);
+    setSendReportStatus(null);
+    try {
+      const res = await authFetch(`/api/admin/clients/${clientId}/send-test-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ period: 'Last 30 Days' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send report');
+      setSendReportStatus({ ok: true, msg: `Report sent to ${data.sentTo}` });
+    } catch (err: any) {
+      setSendReportStatus({ ok: false, msg: err.message });
+    } finally {
+      setSendingReport(false);
+    }
+  };
 
   const [hubspotSyncing, setHubspotSyncing] = useState(false);
   const [hubspotSyncMsg, setHubspotSyncMsg] = useState('');
@@ -70,7 +186,7 @@ export default function Admin() {
   const fetchClients = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/clients');
+      const res = await authFetch('/api/admin/clients');
       if (!res.ok) {
         throw new Error('Failed to fetch clients');
       }
@@ -84,6 +200,7 @@ export default function Admin() {
   };
 
   const openModal = (client?: Client) => {
+    setSendReportStatus(null); // reset send status whenever modal opens
     if (client) {
       setEditingClient(client);
       setIsSlugManuallyEdited(true); // Don't auto-update slug for existing clients
@@ -100,6 +217,12 @@ export default function Admin() {
         uptime_kuma_slug: client.uptime_kuma_slug || '',
         mainwp_site_id: client.mainwp_site_id || '',
         care_plan: client.care_plan || '',
+        contact_email: client.contact_email || '',
+        first_name: client.first_name || '',
+        last_name: client.last_name || '',
+        next_send_date: client.next_send_date || '',
+        hubspot_record_id: client.hubspot_record_id || '',
+        email_notifications: client.email_notifications ?? 1,
         is_active: client.is_active,
       });
     } else {
@@ -117,6 +240,12 @@ export default function Admin() {
         uptime_kuma_slug: '',
         mainwp_site_id: '',
         care_plan: '',
+        contact_email: '',
+        first_name: '',
+        last_name: '',
+        next_send_date: '',
+        hubspot_record_id: '',
+        email_notifications: 1,
         is_active: 1,
       });
     }
@@ -127,18 +256,21 @@ export default function Admin() {
   const [showGASites, setShowGASites] = useState(false);
   const [gaSites, setGaSites] = useState<any[]>([]);
   const [loadingGASites, setLoadingGASites] = useState(false);
+  const [gaSearch, setGaSearch] = useState('');
 
   const [showGSCSites, setShowGSCSites] = useState(false);
   const [gscSites, setGscSites] = useState<any[]>([]);
   const [loadingGSCSites, setLoadingGSCSites] = useState(false);
+  const [gscSearch, setGscSearch] = useState('');
 
   const fetchGASites = async () => {
     setLoadingGASites(true);
     try {
-      const res = await fetch('/api/admin/google/ga-properties');
+      const res = await authFetch('/api/admin/google/ga-properties');
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to fetch GA properties');
       setGaSites(data);
+      setGaSearch('');
       setShowGASites(true);
     } catch (err: any) {
       alert('Error fetching GA properties: ' + err.message);
@@ -150,10 +282,11 @@ export default function Admin() {
   const fetchGSCSites = async () => {
     setLoadingGSCSites(true);
     try {
-      const res = await fetch('/api/admin/google/gsc-sites');
+      const res = await authFetch('/api/admin/google/gsc-sites');
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to fetch GSC sites');
       setGscSites(data);
+      setGscSearch('');
       setShowGSCSites(true);
     } catch (err: any) {
       alert('Error fetching GSC sites: ' + err.message);
@@ -166,7 +299,7 @@ export default function Admin() {
     setHubspotSyncAllRunning(true);
     setHubspotSyncAllMsg('Syncing...');
     try {
-      const res = await fetch('/api/admin/hubspot-sync-all', { method: 'POST' });
+      const res = await authFetch('/api/admin/hubspot-sync-all', { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Sync failed');
       setHubspotSyncAllMsg(`✓ ${data.synced} synced, ${data.skipped} skipped, ${data.errors} errors`);
@@ -211,7 +344,7 @@ export default function Admin() {
     if (!confirm('Are you sure you want to delete this client?')) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/clients/${id}`, {
+      const res = await authFetch(`/api/admin/clients/${id}`, {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error('Failed to delete client');
@@ -230,7 +363,7 @@ export default function Admin() {
     setLoading(true);
     try {
       for (const id of selectedClients) {
-        await fetch(`/api/admin/clients/${id}`, {
+        await authFetch(`/api/admin/clients/${id}`, {
           method: 'DELETE',
         });
       }
@@ -246,7 +379,7 @@ export default function Admin() {
   const handleToggleActive = async (client: Client) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/clients/${client.id}`, {
+      const res = await authFetch(`/api/admin/clients/${client.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -269,7 +402,7 @@ export default function Admin() {
       for (const id of selectedClients) {
         const client = clients.find(c => c.id === id);
         if (client) {
-          await fetch(`/api/admin/clients/${id}`, {
+          await authFetch(`/api/admin/clients/${id}`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -348,6 +481,13 @@ export default function Admin() {
               >
                 <Plus className="w-5 h-5" />
               </button>
+              <button
+                onClick={async () => { await signOut(); window.location.href = '/login'; }}
+                className="flex items-center justify-center w-10 h-10 bg-white text-gray-400 border border-gray-200 rounded-full hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                title="Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
           </div>
         </div>
@@ -407,7 +547,178 @@ export default function Admin() {
 
         {error && <div className="mb-6 p-4 bg-red-900/20 text-red-400 rounded-xl">{error}</div>}
 
-        <div className="bg-white rounded-2xl shadow-none border border-gray-200 overflow-hidden">
+        {/* Tab bar */}
+        <div className="flex gap-1 mb-4 border-b border-gray-200">
+          <button
+            onClick={() => setActiveTab('clients')}
+            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors -mb-px border-b-2 ${
+              activeTab === 'clients' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Users className="w-4 h-4 inline mr-1.5" />
+            Clients
+          </button>
+          <button
+            onClick={() => { setActiveTab('email-log'); fetchEmailLogs(); }}
+            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors -mb-px border-b-2 ${
+              activeTab === 'email-log' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Mail className="w-4 h-4 inline mr-1.5" />
+            Email Log
+          </button>
+          <button
+            onClick={() => { setActiveTab('activity-log'); fetchActivityLogs(); }}
+            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors -mb-px border-b-2 ${
+              activeTab === 'activity-log' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Activity className="w-4 h-4 inline mr-1.5" />
+            Activity Log
+          </button>
+        </div>
+
+        {activeTab === 'email-log' && (
+          <div className="bg-white rounded-2xl shadow-none border border-gray-200 overflow-hidden">
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Email Send History</h3>
+                {emailLogs.length > 0 && <p className="text-xs text-gray-400 mt-0.5">Last {emailLogs.length} emails</p>}
+              </div>
+              <button
+                onClick={fetchEmailLogs}
+                className="p-1.5 text-gray-400 hover:text-gray-900 transition-colors"
+                title="Refresh"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+            {emailLogsLoading ? (
+              <div className="p-12 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
+            ) : emailLogs.length === 0 ? (
+              <div className="p-8 text-center text-gray-500 text-sm">No emails sent yet.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wider">
+                      <th className="p-4 font-medium w-44">Time</th>
+                      <th className="p-4 font-medium">Client</th>
+                      <th className="p-4 font-medium">Recipient</th>
+                      <th className="p-4 font-medium">Subject</th>
+                      <th className="p-4 font-medium w-20">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {emailLogs.map(log => (
+                      <tr key={log.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                        <td className="p-4 text-gray-400 text-xs whitespace-nowrap font-mono">
+                          {new Date(log.created_at).toLocaleString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
+                        </td>
+                        <td className="p-4 text-gray-600 text-xs">{log.client_name}</td>
+                        <td className="p-4 text-gray-600 text-xs">{log.recipient_email}</td>
+                        <td className="p-4 text-gray-700 text-xs max-w-xs truncate" title={log.subject}>{log.subject}</td>
+                        <td className="p-4">
+                          {log.status === 'sent' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+                              Sent
+                            </span>
+                          ) : (
+                            <span
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-600 cursor-help"
+                              title={log.error || ''}
+                            >
+                              Failed
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'activity-log' && (
+          <div className="bg-white rounded-2xl shadow-none border border-gray-200 overflow-hidden">
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Activity Log</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Last {activityLogs.length} events — resets on server restart</p>
+              </div>
+              <button
+                onClick={fetchActivityLogs}
+                className="p-1.5 text-gray-400 hover:text-gray-900 transition-colors"
+                title="Refresh"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+            {activityLoading ? (
+              <div className="p-12 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
+            ) : activityLogs.length === 0 ? (
+              <div className="p-8 text-center text-gray-500 text-sm">No activity yet — logs appear once background jobs run.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wider">
+                      <th className="p-4 font-medium w-44">Time</th>
+                      <th className="p-4 font-medium w-24">Type</th>
+                      <th className="p-4 font-medium w-20">Status</th>
+                      <th className="p-4 font-medium">Client</th>
+                      <th className="p-4 font-medium">Message</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activityLogs.map(entry => {
+                      const typeColors: Record<string, string> = {
+                        psi:     'bg-purple-50 text-purple-700',
+                        ga:      'bg-blue-50 text-blue-700',
+                        gsc:     'bg-indigo-50 text-indigo-700',
+                        hubspot: 'bg-orange-50 text-orange-700',
+                        email:   'bg-pink-50 text-pink-700',
+                        mainwp:  'bg-teal-50 text-teal-700',
+                        system:  'bg-gray-100 text-gray-600',
+                      };
+                      const statusConfig: Record<string, { cls: string; label: string }> = {
+                        success: { cls: 'bg-emerald-50 text-emerald-700', label: 'OK' },
+                        error:   { cls: 'bg-red-50 text-red-600',         label: 'Error' },
+                        warn:    { cls: 'bg-amber-50 text-amber-700',     label: 'Warn' },
+                        info:    { cls: 'bg-sky-50 text-sky-700',         label: 'Info' },
+                      };
+                      const sc = statusConfig[entry.status] || statusConfig.info;
+                      const typeLabel = entry.type.toUpperCase();
+                      return (
+                        <tr key={entry.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                          <td className="p-4 text-gray-400 text-xs whitespace-nowrap font-mono">
+                            {new Date(entry.timestamp).toLocaleString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
+                          </td>
+                          <td className="p-4">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${typeColors[entry.type] || 'bg-gray-100 text-gray-600'}`}>
+                              {typeLabel}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${sc.cls}`}>
+                              {sc.label}
+                            </span>
+                          </td>
+                          <td className="p-4 text-gray-600 text-xs">{entry.client || <span className="text-gray-300">—</span>}</td>
+                          <td className="p-4 text-gray-700 text-xs">{entry.message}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'clients' && <div className="bg-white rounded-2xl shadow-none border border-gray-200 overflow-hidden">
           <div className="p-4 border-b border-gray-200 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <button
@@ -500,7 +811,7 @@ export default function Admin() {
                     </td>
                     <td className="p-4">
                       <div className="flex gap-2">
-                        {client.ga_property_id && <span className="px-2 py-1 bg-blue-900/20 text-blue-300 text-xs rounded-md font-medium">GA</span>}
+                        {client.ga_property_id && <span className="px-2 py-1 bg-blue-900/20 text-xs rounded-md font-medium" style={{color:'#1a8af1'}}>GA</span>}
                         {client.gsc_site_url && <span className="px-2 py-1 bg-purple-900/20 text-purple-700 text-xs rounded-md font-medium">GSC</span>}
                         {client.psi_url && <span className="px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md font-medium">PSI</span>}
                         {client.uptime_kuma_slug && <span className="px-2 py-1 bg-emerald-50 text-emerald-700 text-xs rounded-md font-medium">Uptime</span>}
@@ -526,7 +837,7 @@ export default function Admin() {
                         )}
                       </div>
                     </td>
-                    <td className="p-4 text-right">
+                    <td className="p-4 text-right whitespace-nowrap">
                       <button
                         onClick={() => openModal(client)}
                         className="p-2 text-gray-400 hover:text-gray-900 transition-colors"
@@ -587,7 +898,7 @@ export default function Admin() {
               </button>
             </div>
           </div>
-        </div>
+        </div>}
       </div>
 
       {isModalOpen && (
@@ -758,25 +1069,44 @@ export default function Admin() {
                     </button>
                   </div>
                   {showGASites && (
-                    <div className="mt-2 p-2 border border-gray-200 rounded-xl max-h-40 overflow-y-auto bg-gray-50">
-                      {gaSites.length === 0 ? (
-                        <p className="text-xs text-gray-500 p-2">No properties found. Check Service Account permissions.</p>
-                      ) : (
-                        gaSites.map((site: any) => (
-                          <button
-                            key={site.id}
-                            type="button"
-                            onClick={() => {
-                              setFormData({ ...formData, ga_property_id: site.id });
-                              setShowGASites(false);
-                            }}
-                            className="w-full text-left px-3 py-2 hover:bg-gray-50 hover:shadow-none rounded-lg text-sm transition-all flex justify-between items-center group"
-                          >
-                            <span className="font-medium text-gray-600">{site.name}</span>
-                            <span className="text-xs text-gray-400 group-hover:text-gray-500">{site.id}</span>
-                          </button>
-                        ))
-                      )}
+                    <div className="mt-2 border border-gray-200 rounded-xl bg-white overflow-hidden">
+                      <div className="p-2 border-b border-gray-100">
+                        <input
+                          type="text"
+                          autoFocus
+                          value={gaSearch}
+                          onChange={(e) => setGaSearch(e.target.value)}
+                          placeholder="Search properties..."
+                          className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        />
+                      </div>
+                      <div className="max-h-48 overflow-y-auto p-1">
+                        {gaSites.length === 0 ? (
+                          <p className="text-xs text-gray-500 p-2">No properties found. Check Service Account permissions.</p>
+                        ) : (() => {
+                          const filtered = gaSites.filter((s: any) =>
+                            s.name.toLowerCase().includes(gaSearch.toLowerCase()) ||
+                            s.id.toLowerCase().includes(gaSearch.toLowerCase())
+                          );
+                          return filtered.length === 0 ? (
+                            <p className="text-xs text-gray-400 p-2 text-center">No matches</p>
+                          ) : filtered.map((site: any) => (
+                            <button
+                              key={site.id}
+                              type="button"
+                              onClick={() => {
+                                setFormData({ ...formData, ga_property_id: site.id });
+                                setShowGASites(false);
+                                setGaSearch('');
+                              }}
+                              className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded-lg text-sm transition-all flex justify-between items-center group"
+                            >
+                              <span className="font-medium text-gray-700">{site.name}</span>
+                              <span className="text-xs text-gray-400 group-hover:text-gray-500">{site.id}</span>
+                            </button>
+                          ));
+                        })()}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -804,25 +1134,43 @@ export default function Admin() {
                     </button>
                   </div>
                   {showGSCSites && (
-                    <div className="mt-2 p-2 border border-gray-200 rounded-xl max-h-40 overflow-y-auto bg-gray-50">
-                      {gscSites.length === 0 ? (
-                        <p className="text-xs text-gray-500 p-2">No sites found. Check Service Account permissions.</p>
-                      ) : (
-                        gscSites.map((site: any) => (
-                          <button
-                            key={site.siteUrl}
-                            type="button"
-                            onClick={() => {
-                              setFormData({ ...formData, gsc_site_url: site.siteUrl });
-                              setShowGSCSites(false);
-                            }}
-                            className="w-full text-left px-3 py-2 hover:bg-gray-50 hover:shadow-none rounded-lg text-sm transition-all flex flex-col group"
-                          >
-                            <span className="font-medium text-gray-600">{site.siteUrl}</span>
-                            <span className="text-xs text-gray-400 group-hover:text-gray-500">Permission: {site.permissionLevel}</span>
-                          </button>
-                        ))
-                      )}
+                    <div className="mt-2 border border-gray-200 rounded-xl bg-white overflow-hidden">
+                      <div className="p-2 border-b border-gray-100">
+                        <input
+                          type="text"
+                          autoFocus
+                          value={gscSearch}
+                          onChange={(e) => setGscSearch(e.target.value)}
+                          placeholder="Search sites..."
+                          className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        />
+                      </div>
+                      <div className="max-h-48 overflow-y-auto p-1">
+                        {gscSites.length === 0 ? (
+                          <p className="text-xs text-gray-500 p-2">No sites found. Check Service Account permissions.</p>
+                        ) : (() => {
+                          const filtered = gscSites.filter((s: any) =>
+                            s.siteUrl.toLowerCase().includes(gscSearch.toLowerCase())
+                          );
+                          return filtered.length === 0 ? (
+                            <p className="text-xs text-gray-400 p-2 text-center">No matches</p>
+                          ) : filtered.map((site: any) => (
+                            <button
+                              key={site.siteUrl}
+                              type="button"
+                              onClick={() => {
+                                setFormData({ ...formData, gsc_site_url: site.siteUrl });
+                                setShowGSCSites(false);
+                                setGscSearch('');
+                              }}
+                              className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded-lg text-sm transition-all flex flex-col group"
+                            >
+                              <span className="font-medium text-gray-700">{site.siteUrl}</span>
+                              <span className="text-xs text-gray-400 group-hover:text-gray-500">Permission: {site.permissionLevel}</span>
+                            </button>
+                          ));
+                        })()}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -870,10 +1218,14 @@ export default function Admin() {
                           setHubspotSyncing(true);
                           setHubspotSyncMsg('');
                           try {
-                            const res = await fetch(`/api/admin/clients/${editingClient.id}/hubspot-sync`, { method: 'POST' });
+                            const res = await authFetch(`/api/admin/clients/${editingClient.id}/hubspot-sync`, { method: 'POST' });
                             const data = await res.json();
                             if (!res.ok) throw new Error(data.error || 'Sync failed');
                             setHubspotSyncMsg('✓ Synced successfully');
+                            // Refresh formData with updated hubspot_record_id
+                            if (data.subscription?.recordId) {
+                              setFormData(prev => ({ ...prev, hubspot_record_id: data.subscription.recordId }));
+                            }
                           } catch (err: any) {
                             setHubspotSyncMsg('✗ ' + err.message);
                           } finally {
@@ -885,6 +1237,17 @@ export default function Admin() {
                         {hubspotSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
                         Sync Now
                       </button>
+                      {(formData.hubspot_record_id || editingClient?.hubspot_record_id) && (
+                        <a
+                          href={`https://app-ap1.hubspot.com/contacts/7951938/record/0-69/${formData.hubspot_record_id || editingClient?.hubspot_record_id}/`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-2 bg-gray-800 text-white text-xs font-medium rounded-xl hover:bg-gray-900 transition-colors flex items-center gap-1"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          View in HubSpot
+                        </a>
+                      )}
                       {hubspotSyncMsg && <p className={`text-xs ${hubspotSyncMsg.startsWith('✓') ? 'text-emerald-600' : 'text-red-600'}`}>{hubspotSyncMsg}</p>}
                     </div>
                   )}
@@ -909,6 +1272,113 @@ export default function Admin() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
                   />
                   <p className="text-xs text-gray-500 mt-1">Numeric site ID from your MainWP dashboard. Powers the Website Updates &amp; Stats page.</p>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200 pt-6">
+                <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wider">Monthly Reports</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Contact Email
+                      <span className="ml-2 px-1.5 py-0.5 bg-orange-50 text-orange-600 text-xs rounded font-normal">Synced from HubSpot</span>
+                    </label>
+                    <input
+                      type="email"
+                      value={formData.contact_email}
+                      onChange={(e) => setFormData({ ...formData, contact_email: e.target.value })}
+                      placeholder="client@example.com"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                        First Name
+                        <span className="ml-2 px-1.5 py-0.5 bg-orange-50 text-orange-600 text-xs rounded font-normal">Synced from HubSpot</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.first_name}
+                        onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+                        placeholder="Jane"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                        Last Name
+                        <span className="ml-2 px-1.5 py-0.5 bg-orange-50 text-orange-600 text-xs rounded font-normal">Synced from HubSpot</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.last_name}
+                        onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
+                        placeholder="Smith"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Next Send Date
+                      <span className="ml-2 px-1.5 py-0.5 bg-orange-50 text-orange-600 text-xs rounded font-normal">Synced from HubSpot</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.next_send_date}
+                      onChange={(e) => setFormData({ ...formData, next_send_date: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Auto-computed from the HubSpot subscription start date. Can be overridden manually.</p>
+                  </div>
+                  {/* Send Report Now */}
+                  {editingClient && formData.contact_email && (
+                    <div className="p-4 bg-orange-50 border border-orange-200 rounded-xl">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <h4 className="text-sm font-medium text-gray-900">Send Report Now</h4>
+                          <p className="text-xs text-gray-500 mt-0.5">Send a last-30-days report to <span className="font-medium">{formData.contact_email}</span></p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleSendReportNow(editingClient.id.toString())}
+                          disabled={sendingReport}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-600 text-white text-xs font-semibold rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-60 whitespace-nowrap"
+                        >
+                          {sendingReport
+                            ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Sending…</>
+                            : <><Send className="w-3.5 h-3.5" />Send Now</>
+                          }
+                        </button>
+                      </div>
+                      {sendReportStatus && (
+                        <p className={`mt-2 text-xs font-medium ${sendReportStatus.ok ? 'text-emerald-700' : 'text-red-600'}`}>
+                          {sendReportStatus.ok ? '✓ ' : '✗ '}{sendReportStatus.msg}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between p-4 bg-gray-50 border border-gray-200 rounded-xl">
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-900">Email Notifications</h4>
+                      <p className="text-xs text-gray-500">Send monthly report emails to this client.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, email_notifications: formData.email_notifications === 1 ? 0 : 1 })}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2 ${
+                        formData.email_notifications === 1 ? 'bg-gray-900' : 'bg-gray-300'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          formData.email_notifications === 1 ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </div>
               </div>
 
