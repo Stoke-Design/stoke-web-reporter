@@ -103,12 +103,21 @@ function docToPSI(doc: Record<string, any>): PSISnapshot {
 // ── Clients ──────────────────────────────────────────────────────────────────
 
 export const getClients = async (): Promise<Client_[]> => {
-  // Fetch up to 100 clients (adjust if your instance grows beyond this)
-  const result = await databases.listDocuments(DB_ID, COL_CLIENTS, [
-    Query.orderAsc('name'),
-    Query.limit(100),
-  ]);
-  return result.documents.map(docToClient);
+  // Paginate through all clients — Appwrite max per page is 100
+  const PAGE_SIZE = 100;
+  let all: Client_[] = [];
+  let offset = 0;
+  while (true) {
+    const result = await databases.listDocuments(DB_ID, COL_CLIENTS, [
+      Query.orderAsc('name'),
+      Query.limit(PAGE_SIZE),
+      Query.offset(offset),
+    ]);
+    all = all.concat(result.documents.map(docToClient));
+    if (result.documents.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+  return all;
 };
 
 export const getClientById = async (id: string): Promise<Client_ | undefined> => {
