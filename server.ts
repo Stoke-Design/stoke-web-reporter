@@ -1451,6 +1451,61 @@ async function startServer() {
 
       const { action, slug, fields, message } = req.body;
 
+      // ── create_client ─────────────────────────────────────────────────────
+      // Creates a new client. All client fields accepted in `fields`.
+      // Required: fields.name
+      // Optional: fields.slug (auto-generated if omitted), plus any client field:
+      //   client_id_number, website_url, enabled_pages, ga_property_id,
+      //   gsc_site_url, psi_url, uptime_kuma_slug, mainwp_site_id, care_plan,
+      //   contact_email, first_name, last_name, next_send_date,
+      //   hubspot_record_id, email_notifications, is_active
+      if (action === 'create_client') {
+        const f = fields || {};
+        if (!f.name) return res.status(400).json({ error: 'fields.name is required' });
+        const slug = f.slug || Math.random().toString(36).slice(2, 10);
+        const clientData = {
+          client_id_number: f.client_id_number || '',
+          name: f.name,
+          slug,
+          website_url: f.website_url || '',
+          enabled_pages: f.enabled_pages || '[1,2,3,4,5,6,7,8,9]',
+          ga_property_id: f.ga_property_id || null,
+          gsc_site_url: f.gsc_site_url || null,
+          bq_project_id: null,
+          bq_dataset_id: null,
+          bq_table_id: null,
+          psi_url: f.psi_url || null,
+          uptime_kuma_slug: f.uptime_kuma_slug || null,
+          mainwp_site_id: f.mainwp_site_id || null,
+          care_plan: null,
+          contact_email: f.contact_email || null,
+          first_name: f.first_name || null,
+          last_name: f.last_name || null,
+          next_send_date: f.next_send_date || null,
+          hubspot_record_id: f.hubspot_record_id || null,
+          email_notifications: f.email_notifications !== undefined ? Number(f.email_notifications) : 1,
+          is_active: f.is_active !== undefined ? Number(f.is_active) : 1,
+        };
+        const client = await createClient(clientData);
+        if (f.care_plan) setClientCarePlan(client.id, f.care_plan).catch(() => {});
+        const emailFields: Record<string, any> = {};
+        if (f.contact_email !== undefined)     emailFields.contact_email     = f.contact_email || null;
+        if (f.first_name !== undefined)        emailFields.first_name        = f.first_name || null;
+        if (f.last_name !== undefined)         emailFields.last_name         = f.last_name || null;
+        if (f.next_send_date !== undefined)    emailFields.next_send_date    = f.next_send_date || null;
+        if (f.hubspot_record_id !== undefined) emailFields.hubspot_record_id = f.hubspot_record_id || null;
+        if (f.email_notifications !== undefined) emailFields.email_notifications = Number(f.email_notifications) !== 0;
+        if (Object.keys(emailFields).length > 0) setClientEmailFields(client.id, emailFields).catch(() => {});
+        Promise.all([getSetting('webhook_url'), getSetting('webhook_secret'), getSetting('webhook_events_enabled')]).then(([url, secret, events]) => {
+          if (url) fireWebhook(url, secret || '', events || '[]', 'client.created', { slug: client.slug, name: client.name });
+        }).catch(() => {});
+        addLog('system', 'success', `Client created via inbound webhook: ${client.name}`, client.name);
+        return res.json({ success: true, action, client });
+      }
+
+      // ── refresh_psi ───────────────────────────────────────────────────────
+      // Triggers an immediate PageSpeed Insights snapshot for a client.
+      // Required: slug
       if (action === 'refresh_psi') {
         const client = await getClientBySlug(slug);
         if (!client || !client.psi_url) return res.status(404).json({ error: 'Client not found or PSI not configured' });
@@ -1458,19 +1513,93 @@ async function startServer() {
         await savePSISnapshot(client.id, 'mobile', slimPSIData(data));
         const dataDesktop = await fetchPSIData(client.psi_url, 'desktop');
         await savePSISnapshot(client.id, 'desktop', slimPSIData(dataDesktop));
+        addLog('psi', 'success', `PSI snapshot triggered via inbound webhook`, client.name);
         return res.json({ success: true, action });
       }
 
+      // ── update_client ─────────────────────────────────────────────────────
+      // Updates an existing client by slug. Pass any client fields in `fields`.
+      // Required: slug
+      // Optional fields (any subset):
+      //   name, website_url, enabled_pages, ga_property_id, gsc_site_url,
+      //   psi_url, uptime_kuma_slug, mainwp_site_id, care_plan,
+      //   contact_email, first_name, last_name, next_send_date,
+      //   hubspot_record_id, email_notifications, is_active
       if (action === 'update_client') {
         const client = await getClientBySlug(slug);
         if (!client) return res.status(404).json({ error: 'Client not found' });
-        const updated = await updateClient(client.id, { ...client, ...(fields || {}) });
+        const f = fields || {};
+        const updated = await updateClient(client.id, { ...client, ...f });
+        if (f.care_plan !== undefined) setClientCarePlan(client.id, f.care_plan || null).catch(() => {});
+        const emailFields: Record<string, any> = {};
+        if (f.contact_email !== undefined)     emailFields.contact_email     = f.contact_email || null;
+        if (f.first_name !== undefined)        emailFields.first_name        = f.first_name || null;
+        if (f.last_name !== undefined)         emailFields.last_name         = f.last_name || null;
+        if (f.next_send_date !== undefined)    emailFields.next_send_date    = f.next_send_date || null;
+        if (f.hubspot_record_id !== undefined) emailFields.hubspot_record_id = f.hubspot_record_id || null;
+        if (f.email_notifications !== undefined) emailFields.email_notifications = Number(f.email_notifications) !== 0;
+        if (Object.keys(emailFields).length > 0) await setClientEmailFields(client.id, emailFields);
+        clearClientReportCache(client.id).catch(() => {});
+        addLog('system', 'success', `Client updated via inbound webhook`, client.name);
         return res.json({ success: true, action, client: updated });
       }
 
+      // ── post_notification ─────────────────────────────────────────────────
+      // Sets the global notification banner shown on all client dashboards.
+      // Required: message (set to "" to clear)
       if (action === 'post_notification') {
         if (message !== undefined) await setSetting('global_notification', String(message));
         return res.json({ success: true, action });
+      }
+
+      // ── hubspot_sync ──────────────────────────────────────────────────────
+      // Triggers an immediate HubSpot sync for a single client by slug,
+      // or all active clients if slug is omitted.
+      if (action === 'hubspot_sync') {
+        const [token, legacyKey] = await Promise.all([getSetting('hubspot_access_token'), getSetting('hubspot_api_key')]);
+        const accessToken = token || legacyKey || '';
+        if (!accessToken) return res.status(400).json({ error: 'HubSpot not configured' });
+        if (slug) {
+          const client = await getClientBySlug(slug);
+          if (!client) return res.status(404).json({ error: 'Client not found' });
+          const sub = await getHubSpotSubscriptionByUrl(accessToken, client.website_url || '').catch(() => null);
+          if (!sub) return res.status(404).json({ error: 'No HubSpot subscription found for client website URL' });
+          const emailFields: Record<string, any> = {};
+          if (sub.carePlan !== undefined) setClientCarePlan(client.id, sub.carePlan).catch(() => {});
+          const contact = await getHubSpotContactForSubscription(accessToken, sub.recordId).catch(() => ({ firstName: null, lastName: null, email: null }));
+          if (contact.email)     emailFields.contact_email = contact.email;
+          if (contact.firstName) emailFields.first_name    = contact.firstName;
+          if (contact.lastName)  emailFields.last_name     = contact.lastName;
+          if (sub.recordId)      emailFields.hubspot_record_id = sub.recordId;
+          const dateSource = sub.startDate || sub.createDate || sub.nextReviewDate;
+          if (dateSource) emailFields.next_send_date = computeNextSendDate(dateSource);
+          if (Object.keys(emailFields).length > 0) await setClientEmailFields(client.id, emailFields);
+          addLog('hubspot', 'success', `Manual sync via inbound webhook`, client.name);
+          return res.json({ success: true, action, synced: 1 });
+        } else {
+          // Sync all — fire and forget, return immediately
+          getClients().then(async (clients) => {
+            for (const c of clients) {
+              if (!c.is_active || !c.website_url) continue;
+              try {
+                const sub = await getHubSpotSubscriptionByUrl(accessToken, c.website_url).catch(() => null);
+                if (!sub) continue;
+                const emailFields: Record<string, any> = {};
+                if (sub.carePlan !== undefined) setClientCarePlan(c.id, sub.carePlan).catch(() => {});
+                const contact = await getHubSpotContactForSubscription(accessToken, sub.recordId).catch(() => ({ firstName: null, lastName: null, email: null }));
+                if (contact.email)     emailFields.contact_email = contact.email;
+                if (contact.firstName) emailFields.first_name    = contact.firstName;
+                if (contact.lastName)  emailFields.last_name     = contact.lastName;
+                if (sub.recordId)      emailFields.hubspot_record_id = sub.recordId;
+                const dateSource = sub.startDate || sub.createDate || sub.nextReviewDate;
+                if (dateSource) emailFields.next_send_date = computeNextSendDate(dateSource);
+                if (Object.keys(emailFields).length > 0) await setClientEmailFields(c.id, emailFields);
+              } catch {}
+            }
+            addLog('hubspot', 'success', `Bulk sync triggered via inbound webhook — ${clients.length} clients processed`);
+          }).catch(() => {});
+          return res.json({ success: true, action, note: 'Bulk sync started in background' });
+        }
       }
 
       return res.status(400).json({ error: `Unknown action: ${action}` });
