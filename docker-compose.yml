@@ -1,0 +1,11 @@
+services:
+  stoke-web-reporter:
+    build: .
+    container_name: stoke-web-reporter
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - web
+networks:
+  web:
+    external: true

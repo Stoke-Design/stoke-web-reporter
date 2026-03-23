@@ -318,7 +318,7 @@ export default function Admin() {
       const url = editingClient ? `/api/admin/clients/${editingClient.id}` : '/api/admin/clients';
       const method = editingClient ? 'PUT' : 'POST';
       
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json',
